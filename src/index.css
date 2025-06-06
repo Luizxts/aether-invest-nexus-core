@@ -1,64 +1,17 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-
-    --radius: 0.5rem;
-
-    --sidebar-background: 0 0% 98%;
-
-    --sidebar-foreground: 240 5.3% 26.1%;
-
-    --sidebar-primary: 240 5.9% 10%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
+    --background: 220 13% 4%;
     --foreground: 210 40% 98%;
 
-    --card: 222.2 84% 4.9%;
+    --card: 224 15% 8%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 222.2 84% 4.9%;
+    --popover: 224 15% 8%;
     --popover-foreground: 210 40% 98%;
 
     --primary: 210 40% 98%;
@@ -79,14 +32,8 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    --radius: 0.5rem;
   }
 }
 
@@ -96,6 +43,80 @@
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-matrix-dark text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #0d1117 0%, #1a1a2e 25%, #16213e 50%, #0f3460 75%, #533483 100%);
+    background-attachment: fixed;
+  }
+
+  /* Scrollbar personalizada */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-matrix-dark;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-neon-blue rounded-full;
+    box-shadow: 0 0 10px rgba(0, 204, 255, 0.5);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-neon-green;
+    box-shadow: 0 0 15px rgba(0, 255, 136, 0.7);
+  }
+}
+
+@layer components {
+  .cyber-card {
+    @apply bg-gradient-to-br from-gray-900/50 to-gray-800/30 backdrop-blur-md border border-gray-700/50 rounded-lg;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+
+  .neon-text {
+    @apply text-transparent bg-clip-text;
+    background-image: linear-gradient(90deg, #00ff88, #00ccff);
+    text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+  }
+
+  .cyber-button {
+    @apply relative overflow-hidden bg-gradient-to-r from-cyber-600 to-cyber-800 text-white px-6 py-3 rounded-lg font-semibold;
+    @apply hover:from-cyber-500 hover:to-cyber-700 transition-all duration-300;
+    box-shadow: 0 4px 15px rgba(8, 145, 178, 0.4);
+  }
+
+  .cyber-button:hover {
+    box-shadow: 0 6px 20px rgba(8, 145, 178, 0.6);
+    transform: translateY(-2px);
+  }
+
+  .danger-mode {
+    @apply bg-gradient-to-r from-red-600 to-pink-600;
+    box-shadow: 0 0 20px rgba(255, 0, 110, 0.4);
+  }
+
+  .safe-mode {
+    @apply bg-gradient-to-r from-green-600 to-emerald-600;
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
+  }
+
+  .matrix-effect {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .matrix-effect::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(circle at 20% 50%, rgba(0, 255, 136, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(0, 204, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 80%, rgba(139, 92, 246, 0.1) 0%, transparent 50%);
+    pointer-events: none;
   }
 }

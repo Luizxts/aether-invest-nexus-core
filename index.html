@@ -1,24 +1,86 @@
+
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>aether-invest-nexus-core</title>
-    <meta name="description" content="Lovable Generated Project" />
-    <meta name="author" content="Lovable" />
+    <title>Seravat Invest - IA Trading Professional</title>
+    <meta name="description" content="Sistema de IA para Trading Profissional com Conexão Binance" />
+    <meta name="author" content="Seravat Invest" />
 
-    <meta property="og:title" content="aether-invest-nexus-core" />
-    <meta property="og:description" content="Lovable Generated Project" />
+    <meta property="og:title" content="Seravat Invest - IA Trading Professional" />
+    <meta property="og:description" content="Sistema de IA Evolutiva para Trading Real com Conexão Binance" />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
-
+    
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@lovable_dev" />
-    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    
+    <!-- Fontes -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <!-- reCAPTCHA -->
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+    
+    <style>
+      /* Preloader */
+      .preloader {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(135deg, #0d1117 0%, #1a1a2e 25%, #16213e 50%, #0f3460 75%, #533483 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        transition: opacity 0.5s ease;
+      }
+      
+      .preloader.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      
+      .cyber-loader {
+        width: 60px;
+        height: 60px;
+        border: 3px solid rgba(0, 255, 136, 0.3);
+        border-top: 3px solid #00ff88;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
   </head>
 
   <body>
+    <!-- Preloader -->
+    <div class="preloader" id="preloader">
+      <div class="cyber-loader"></div>
+    </div>
+    
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    
+    <script>
+      // Remover preloader quando a página carregar
+      window.addEventListener('load', function() {
+        const preloader = document.getElementById('preloader');
+        if (preloader) {
+          setTimeout(() => {
+            preloader.classList.add('hidden');
+            setTimeout(() => {
+              preloader.remove();
+            }, 500);
+          }, 1000);
+        }
+      });
+    </script>
   </body>
 </html>
