@@ -1,49 +1,79 @@
 
-import React, { useState } from 'react';
-import LoginPage from '@/components/LoginPage';
-import BinanceSetup from '@/components/BinanceSetup';
+import React from 'react';
+import { useAuth, AuthProvider } from '@/hooks/useAuth';
+import AuthPage from '@/components/AuthPage';
+import RealBinanceSetup from '@/components/RealBinanceSetup';
 import TradingDashboard from '@/components/TradingDashboard';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 
-type AppState = 'login' | 'setup' | 'dashboard';
+const AppContent = () => {
+  const { user, loading } = useAuth();
+  const [appState, setAppState] = useState<'setup' | 'dashboard'>('setup');
+  const [hasCredentials, setHasCredentials] = useState(false);
 
-const Index: React.FC = () => {
-  const [appState, setAppState] = useState<AppState>('login');
-  const [username, setUsername] = useState('');
-  const [apiCredentials, setApiCredentials] = useState({ apiKey: '', secretKey: '' });
+  useEffect(() => {
+    if (user) {
+      checkBinanceCredentials();
+    }
+  }, [user]);
 
-  const handleLogin = (user: string) => {
-    setUsername(user);
-    setAppState('setup');
-  };
+  const checkBinanceCredentials = async () => {
+    if (!user) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('user_binance_credentials')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single();
 
-  const handleSetupComplete = (apiKey: string, secretKey: string) => {
-    setApiCredentials({ apiKey, secretKey });
-    setAppState('dashboard');
-  };
-
-  const renderCurrentState = () => {
-    switch (appState) {
-      case 'login':
-        return <LoginPage onLogin={handleLogin} />;
-      case 'setup':
-        return <BinanceSetup onSetupComplete={handleSetupComplete} />;
-      case 'dashboard':
-        return (
-          <TradingDashboard 
-            username={username}
-            apiKey={apiCredentials.apiKey}
-            secretKey={apiCredentials.secretKey}
-          />
-        );
-      default:
-        return <LoginPage onLogin={handleLogin} />;
+      if (data && !error) {
+        setHasCredentials(true);
+        setAppState('dashboard');
+      } else {
+        setHasCredentials(false);
+        setAppState('setup');
+      }
+    } catch (err) {
+      setHasCredentials(false);
+      setAppState('setup');
     }
   };
 
+  const handleSetupComplete = () => {
+    setHasCredentials(true);
+    setAppState('dashboard');
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center matrix-effect">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-neon-blue/30 border-t-neon-blue rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-neon-blue">Carregando Seravat Invest...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthPage />;
+  }
+
+  if (appState === 'setup' && !hasCredentials) {
+    return <RealBinanceSetup onSetupComplete={handleSetupComplete} />;
+  }
+
+  return <TradingDashboard />;
+};
+
+const Index: React.FC = () => {
   return (
-    <div className="min-h-screen">
-      {renderCurrentState()}
-    </div>
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 };
 

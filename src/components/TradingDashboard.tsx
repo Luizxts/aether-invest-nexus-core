@@ -3,19 +3,15 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   TrendingUp, 
   TrendingDown, 
   DollarSign, 
-  Settings, 
   Brain, 
-  Shield, 
-  AlertTriangle,
   Activity,
   Eye,
-  Zap
+  LogOut
 } from 'lucide-react';
 import TradingChart from './TradingChart';
 import AIStatus from './AIStatus';
@@ -23,50 +19,131 @@ import RiskSettings from './RiskSettings';
 import TradingModeSelector from './TradingModeSelector';
 import NewsPanel from './NewsPanel';
 import PortfolioOverview from './PortfolioOverview';
+import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
 
-interface TradingDashboardProps {
-  username: string;
-  apiKey: string;
-  secretKey: string;
-}
-
-const TradingDashboard: React.FC<TradingDashboardProps> = ({ 
-  username, 
-  apiKey, 
-  secretKey 
-}) => {
-  const [aiLevel, setAiLevel] = useState(1);
-  const [tradingMode, setTradingMode] = useState<'safe' | 'danger'>('safe');
-  const [isTrading, setIsTrading] = useState(false);
-  const [balance, setBalance] = useState(10000);
+const TradingDashboard: React.FC = () => {
+  const { user, signOut } = useAuth();
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [portfolioData, setPortfolioData] = useState<any>(null);
+  const [riskSettings, setRiskSettings] = useState<any>(null);
+  const [realTimeBalance, setRealTimeBalance] = useState(0);
   const [dailyPnL, setDailyPnL] = useState(0);
-  const [riskSettings, setRiskSettings] = useState({
-    maxDailyLoss: 5,
-    maxRiskPerTrade: 2,
-    stopLoss: true
-  });
 
-  // Simular dados de trading em tempo real
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (isTrading) {
-        const change = (Math.random() - 0.5) * 100;
-        setDailyPnL(prev => prev + change);
-        setBalance(prev => prev + change);
-        
-        // Simular evolução da IA
-        if (Math.random() > 0.99) {
-          setAiLevel(prev => Math.min(prev + 1, 100));
-        }
+    if (user) {
+      fetchUserData();
+      const interval = setInterval(fetchRealTimeData, 10000); // Atualizar a cada 10 segundos
+      return () => clearInterval(interval);
+    }
+  }, [user]);
+
+  const fetchUserData = async () => {
+    if (!user) return;
+
+    try {
+      // Buscar perfil do usuário
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      setUserProfile(profile);
+
+      // Buscar dados do portfólio
+      const { data: portfolio } = await supabase
+        .from('portfolio_data')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+
+      if (portfolio) {
+        setPortfolioData(portfolio);
+        setRealTimeBalance(parseFloat(portfolio.total_balance));
+        setDailyPnL(parseFloat(portfolio.daily_pnl));
       }
-    }, 3000);
 
-    return () => clearInterval(interval);
-  }, [isTrading]);
+      // Buscar configurações de risco
+      const { data: risk } = await supabase
+        .from('risk_settings')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
 
-  const toggleTrading = () => {
-    setIsTrading(!isTrading);
+      setRiskSettings(risk);
+
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+    }
   };
+
+  const fetchRealTimeData = async () => {
+    if (!user) return;
+
+    try {
+      const response = await supabase.functions.invoke('get-binance-balance', {
+        body: { userId: user.id }
+      });
+
+      if (response.data?.balance) {
+        const newBalance = response.data.balance;
+        const pnl = newBalance - realTimeBalance;
+        
+        setRealTimeBalance(newBalance);
+        setDailyPnL(prev => prev + pnl);
+
+        // Atualizar no banco de dados
+        await supabase
+          .from('portfolio_data')
+          .upsert({
+            user_id: user.id,
+            total_balance: newBalance,
+            daily_pnl: dailyPnL + pnl,
+            last_updated: new Date().toISOString()
+          });
+      }
+    } catch (error) {
+      console.error('Error fetching real-time data:', error);
+    }
+  };
+
+  const toggleTrading = async () => {
+    if (!user || !riskSettings) return;
+
+    const newTradingState = !riskSettings.is_trading_active;
+
+    try {
+      const { error } = await supabase
+        .from('risk_settings')
+        .update({ is_trading_active: newTradingState })
+        .eq('user_id', user.id);
+
+      if (!error) {
+        setRiskSettings({
+          ...riskSettings,
+          is_trading_active: newTradingState
+        });
+      }
+    } catch (error) {
+      console.error('Error toggling trading:', error);
+    }
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+  };
+
+  if (!userProfile || !portfolioData || !riskSettings) {
+    return (
+      <div className="min-h-screen flex items-center justify-center matrix-effect">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-neon-blue/30 border-t-neon-blue rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-neon-blue">Carregando dados do usuário...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-matrix-dark p-4 matrix-effect">
@@ -75,28 +152,37 @@ const TradingDashboard: React.FC<TradingDashboardProps> = ({
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-3xl font-bold neon-text">
-              Seravat Invest
+              Seravat Invest Pro
             </h1>
             <p className="text-gray-400">
-              Bem-vindo, <span className="text-neon-blue">{username}</span>
+              Bem-vindo, <span className="text-neon-blue">{userProfile.username || user.email}</span>
             </p>
           </div>
           
           <div className="flex items-center gap-4">
             <Badge variant="outline" className="border-neon-green text-neon-green">
               <Eye className="w-4 h-4 mr-2" />
-              Binance Conectada
+              Binance Conectada (Real)
             </Badge>
             
             <Button
               onClick={toggleTrading}
               className={`${
-                isTrading 
+                riskSettings.is_trading_active 
                   ? 'bg-red-600 hover:bg-red-700' 
                   : 'bg-green-600 hover:bg-green-700'
               } text-white`}
             >
-              {isTrading ? 'Parar Trading' : 'Iniciar Trading'}
+              {riskSettings.is_trading_active ? 'Parar Trading' : 'Iniciar Trading'}
+            </Button>
+
+            <Button
+              onClick={handleSignOut}
+              variant="outline"
+              className="border-gray-600 text-gray-300 hover:bg-gray-700"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Sair
             </Button>
           </div>
         </div>
@@ -107,9 +193,9 @@ const TradingDashboard: React.FC<TradingDashboardProps> = ({
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-400">Saldo Total</p>
+                  <p className="text-sm text-gray-400">Saldo Real (USDT)</p>
                   <p className="text-2xl font-bold text-white">
-                    ${balance.toFixed(2)}
+                    ${realTimeBalance.toFixed(2)}
                   </p>
                 </div>
                 <DollarSign className="w-8 h-8 text-neon-blue" />
@@ -143,7 +229,7 @@ const TradingDashboard: React.FC<TradingDashboardProps> = ({
                 <div>
                   <p className="text-sm text-gray-400">Nível da IA</p>
                   <p className="text-2xl font-bold text-neon-purple">
-                    Nível {aiLevel}
+                    Nível {riskSettings.ai_level}
                   </p>
                 </div>
                 <Brain className="w-8 h-8 text-neon-purple animate-pulse-neon" />
@@ -157,13 +243,13 @@ const TradingDashboard: React.FC<TradingDashboardProps> = ({
                 <div>
                   <p className="text-sm text-gray-400">Status</p>
                   <p className={`text-lg font-bold ${
-                    isTrading ? 'text-neon-green' : 'text-gray-400'
+                    riskSettings.is_trading_active ? 'text-neon-green' : 'text-gray-400'
                   }`}>
-                    {isTrading ? 'Ativo' : 'Parado'}
+                    {riskSettings.is_trading_active ? 'Ativo' : 'Parado'}
                   </p>
                 </div>
                 <Activity className={`w-8 h-8 ${
-                  isTrading ? 'text-neon-green animate-pulse' : 'text-gray-400'
+                  riskSettings.is_trading_active ? 'text-neon-green animate-pulse' : 'text-gray-400'
                 }`} />
               </div>
             </CardContent>
@@ -188,11 +274,18 @@ const TradingDashboard: React.FC<TradingDashboardProps> = ({
             </div>
             <div className="space-y-4">
               <TradingModeSelector 
-                mode={tradingMode} 
-                onModeChange={setTradingMode}
-                isTrading={isTrading}
+                mode={riskSettings.trading_mode} 
+                onModeChange={(mode) => {
+                  // Atualizar no banco de dados
+                  supabase
+                    .from('risk_settings')
+                    .update({ trading_mode: mode })
+                    .eq('user_id', user?.id);
+                  setRiskSettings({...riskSettings, trading_mode: mode});
+                }}
+                isTrading={riskSettings.is_trading_active}
               />
-              <PortfolioOverview balance={balance} pnl={dailyPnL} />
+              <PortfolioOverview balance={realTimeBalance} pnl={dailyPnL} />
             </div>
           </div>
         </TabsContent>
@@ -203,9 +296,9 @@ const TradingDashboard: React.FC<TradingDashboardProps> = ({
 
         <TabsContent value="ai-status" className="space-y-4">
           <AIStatus 
-            level={aiLevel} 
-            isActive={isTrading}
-            mode={tradingMode}
+            level={riskSettings.ai_level} 
+            isActive={riskSettings.is_trading_active}
+            mode={riskSettings.trading_mode}
           />
         </TabsContent>
 
@@ -216,7 +309,14 @@ const TradingDashboard: React.FC<TradingDashboardProps> = ({
         <TabsContent value="settings" className="space-y-4">
           <RiskSettings 
             settings={riskSettings}
-            onSettingsChange={setRiskSettings}
+            onSettingsChange={(newSettings) => {
+              // Atualizar no banco de dados
+              supabase
+                .from('risk_settings')
+                .update(newSettings)
+                .eq('user_id', user?.id);
+              setRiskSettings(newSettings);
+            }}
           />
         </TabsContent>
       </Tabs>
