@@ -127,7 +127,7 @@ const BinanceSetup: React.FC<BinanceSetupProps> = ({ onSetupComplete }) => {
 
           <div className="text-center">
             <p className="text-xs text-gray-500">
-              🔒 Conexão criptografada AES-256 • 🚀 Latência < 10ms
+              🔒 Conexão criptografada AES-256 • 🚀 Latência menor que 10ms
             </p>
           </div>
         </CardContent>
