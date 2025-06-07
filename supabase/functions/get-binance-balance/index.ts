@@ -80,29 +80,92 @@ serve(async (req) => {
     })
 
     const data = await response.json()
+    console.log('Binance API Response:', data)
 
     if (response.ok && data.balances) {
-      // Calculate total balance in USDT
-      let totalBalance = 0
+      // Get current crypto prices to convert to USDT
+      const pricesResponse = await fetch('https://api.binance.com/api/v3/ticker/price')
+      const prices = await pricesResponse.json()
       
-      // Get USDT balance
-      const usdtBalance = data.balances.find((b: any) => b.asset === 'USDT')
-      if (usdtBalance) {
-        totalBalance += parseFloat(usdtBalance.free) + parseFloat(usdtBalance.locked)
+      // Create a price map for easy lookup
+      const priceMap = new Map()
+      prices.forEach((price: any) => {
+        priceMap.set(price.symbol, parseFloat(price.price))
+      })
+      
+      let totalBalance = 0
+      const nonZeroBalances = []
+      
+      // Process all balances
+      for (const balance of data.balances) {
+        const asset = balance.asset
+        const free = parseFloat(balance.free)
+        const locked = parseFloat(balance.locked)
+        const total = free + locked
+        
+        if (total > 0) {
+          nonZeroBalances.push({
+            asset,
+            free: free.toString(),
+            locked: locked.toString(),
+            total: total.toString()
+          })
+          
+          if (asset === 'USDT') {
+            // USDT is already in USDT value
+            totalBalance += total
+            console.log(`${asset}: ${total} USDT (direct)`)
+          } else {
+            // Convert other assets to USDT
+            const usdtSymbol = `${asset}USDT`
+            const btcSymbol = `${asset}BTC`
+            
+            let usdtValue = 0
+            
+            // Try direct conversion to USDT
+            if (priceMap.has(usdtSymbol)) {
+              usdtValue = total * priceMap.get(usdtSymbol)
+              console.log(`${asset}: ${total} * ${priceMap.get(usdtSymbol)} = ${usdtValue} USDT`)
+            }
+            // Try conversion via BTC
+            else if (priceMap.has(btcSymbol) && priceMap.has('BTCUSDT')) {
+              const btcPrice = priceMap.get(btcSymbol)
+              const btcToUsdt = priceMap.get('BTCUSDT')
+              usdtValue = total * btcPrice * btcToUsdt
+              console.log(`${asset}: ${total} * ${btcPrice} * ${btcToUsdt} = ${usdtValue} USDT (via BTC)`)
+            }
+            // If it's BTC, convert directly
+            else if (asset === 'BTC' && priceMap.has('BTCUSDT')) {
+              usdtValue = total * priceMap.get('BTCUSDT')
+              console.log(`${asset}: ${total} * ${priceMap.get('BTCUSDT')} = ${usdtValue} USDT`)
+            }
+            
+            totalBalance += usdtValue
+          }
+        }
       }
+
+      console.log(`Total balance calculated: ${totalBalance} USDT`)
+      console.log(`Non-zero balances:`, nonZeroBalances)
 
       return new Response(
         JSON.stringify({ 
           balance: totalBalance,
-          balances: data.balances.filter((b: any) => parseFloat(b.free) > 0 || parseFloat(b.locked) > 0)
+          balances: nonZeroBalances,
+          debug: {
+            totalAssets: data.balances.length,
+            nonZeroAssets: nonZeroBalances.length,
+            calculatedTotal: totalBalance
+          }
         }),
         { 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       )
     } else {
+      console.error('Binance API Error:', data)
       return new Response(
-        JSON.stringify({ error: data.msg || 'Failed to fetch balance' }),
+        JSON.stringify({ error: data.msg || 'Failed to fetch balance', details: data }),
         { 
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -113,7 +176,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error fetching Binance balance:', error)
     return new Response(
-      JSON.stringify({ error: 'Failed to fetch balance' }),
+      JSON.stringify({ error: 'Failed to fetch balance', details: error.message }),
       { 
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }

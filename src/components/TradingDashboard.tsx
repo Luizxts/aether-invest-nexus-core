@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,7 +11,8 @@ import {
   Brain, 
   Activity,
   Eye,
-  LogOut
+  LogOut,
+  RefreshCw
 } from 'lucide-react';
 import TradingChart from './TradingChart';
 import AIStatus from './AIStatus';
@@ -20,19 +22,23 @@ import NewsPanel from './NewsPanel';
 import PortfolioOverview from './PortfolioOverview';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 
 const TradingDashboard: React.FC = () => {
   const { user, signOut } = useAuth();
+  const { toast } = useToast();
   const [userProfile, setUserProfile] = useState<any>(null);
   const [portfolioData, setPortfolioData] = useState<any>(null);
   const [riskSettings, setRiskSettings] = useState<any>(null);
   const [realTimeBalance, setRealTimeBalance] = useState(0);
   const [dailyPnL, setDailyPnL] = useState(0);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+  const [balanceDetails, setBalanceDetails] = useState<any>(null);
 
   useEffect(() => {
     if (user) {
       fetchUserData();
-      const interval = setInterval(fetchRealTimeData, 10000); // Atualizar a cada 10 segundos
+      const interval = setInterval(fetchRealTimeData, 30000); // Atualizar a cada 30 segundos
       return () => clearInterval(interval);
     }
   }, [user]);
@@ -72,6 +78,9 @@ const TradingDashboard: React.FC = () => {
 
       setRiskSettings(risk);
 
+      // Buscar saldo inicial da Binance
+      await fetchRealTimeData();
+
     } catch (error) {
       console.error('Error fetching user data:', error);
     }
@@ -80,17 +89,36 @@ const TradingDashboard: React.FC = () => {
   const fetchRealTimeData = async () => {
     if (!user) return;
 
+    setIsLoadingBalance(true);
     try {
+      console.log('Fetching balance for user:', user.id);
+      
       const response = await supabase.functions.invoke('get-binance-balance', {
         body: { userId: user.id }
       });
 
-      if (response.data?.balance) {
+      console.log('Balance response:', response);
+
+      if (response.error) {
+        console.error('Error from edge function:', response.error);
+        toast({
+          title: "Erro ao buscar saldo",
+          description: `Erro: ${response.error.message || 'Erro desconhecido'}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (response.data?.balance !== undefined) {
         const newBalance = response.data.balance;
         const pnl = newBalance - realTimeBalance;
         
+        console.log('New balance:', newBalance);
+        console.log('Balance details:', response.data);
+        
         setRealTimeBalance(newBalance);
         setDailyPnL(prev => prev + pnl);
+        setBalanceDetails(response.data);
 
         // Atualizar no banco de dados
         await supabase
@@ -101,9 +129,28 @@ const TradingDashboard: React.FC = () => {
             daily_pnl: dailyPnL + pnl,
             last_updated: new Date().toISOString()
           });
+
+        toast({
+          title: "Saldo atualizado",
+          description: `Saldo atual: $${newBalance.toFixed(2)} USDT`,
+        });
+      } else {
+        console.error('No balance data received:', response.data);
+        toast({
+          title: "Erro ao buscar saldo",
+          description: "Não foi possível obter o saldo da Binance",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error('Error fetching real-time data:', error);
+      toast({
+        title: "Erro de conexão",
+        description: "Erro ao conectar com a Binance. Verifique suas credenciais.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingBalance(false);
     }
   };
 
@@ -165,6 +212,17 @@ const TradingDashboard: React.FC = () => {
             </Badge>
             
             <Button
+              onClick={fetchRealTimeData}
+              disabled={isLoadingBalance}
+              variant="outline"
+              size="sm"
+              className="border-neon-blue text-neon-blue hover:bg-neon-blue/10"
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingBalance ? 'animate-spin' : ''}`} />
+              {isLoadingBalance ? 'Atualizando...' : 'Atualizar Saldo'}
+            </Button>
+
+            <Button
               onClick={toggleTrading}
               className={`${
                 riskSettings.is_trading_active 
@@ -196,6 +254,11 @@ const TradingDashboard: React.FC = () => {
                   <p className="text-2xl font-bold text-white">
                     ${realTimeBalance.toFixed(2)}
                   </p>
+                  {balanceDetails?.debug && (
+                    <p className="text-xs text-gray-500">
+                      {balanceDetails.debug.nonZeroAssets} ativos
+                    </p>
+                  )}
                 </div>
                 <DollarSign className="w-8 h-8 text-neon-blue" />
               </div>
