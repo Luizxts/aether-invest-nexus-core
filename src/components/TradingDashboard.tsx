@@ -97,8 +97,8 @@ const TradingDashboard: React.FC = () => {
           .from('portfolio_data')
           .upsert({
             user_id: user.id,
-            total_balance: newBalance.toString(),
-            daily_pnl: (dailyPnL + pnl).toString(),
+            total_balance: newBalance,
+            daily_pnl: dailyPnL + pnl,
             last_updated: new Date().toISOString()
           });
       }
