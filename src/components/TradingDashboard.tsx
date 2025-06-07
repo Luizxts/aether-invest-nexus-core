@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -60,8 +59,8 @@ const TradingDashboard: React.FC = () => {
 
       if (portfolio) {
         setPortfolioData(portfolio);
-        setRealTimeBalance(parseFloat(portfolio.total_balance));
-        setDailyPnL(parseFloat(portfolio.daily_pnl));
+        setRealTimeBalance(Number(portfolio.total_balance));
+        setDailyPnL(Number(portfolio.daily_pnl));
       }
 
       // Buscar configurações de risco
@@ -98,8 +97,8 @@ const TradingDashboard: React.FC = () => {
           .from('portfolio_data')
           .upsert({
             user_id: user.id,
-            total_balance: newBalance,
-            daily_pnl: dailyPnL + pnl,
+            total_balance: newBalance.toString(),
+            daily_pnl: (dailyPnL + pnl).toString(),
             last_updated: new Date().toISOString()
           });
       }
