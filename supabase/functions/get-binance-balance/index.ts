@@ -24,6 +24,8 @@ serve(async (req) => {
       )
     }
 
+    console.log('Fetching credentials for user:', userId)
+
     // Create Supabase client with service key
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
@@ -36,8 +38,12 @@ serve(async (req) => {
       .single()
 
     if (credError || !credentials) {
+      console.error('No credentials found:', credError)
       return new Response(
-        JSON.stringify({ error: 'No active Binance credentials found' }),
+        JSON.stringify({ 
+          error: 'Credenciais da Binance não encontradas',
+          details: 'Configure suas credenciais da Binance primeiro'
+        }),
         { 
           status: 404,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -46,8 +52,10 @@ serve(async (req) => {
     }
 
     const { api_key_encrypted: apiKey, secret_key_encrypted: secretKey } = credentials
+    
+    console.log('Testing Binance connection with API Key:', apiKey.substring(0, 8) + '...')
 
-    // Create signature for Binance API
+    // Test connection first with account info
     const timestamp = Date.now()
     const queryString = `timestamp=${timestamp}`
     
@@ -73,6 +81,8 @@ serve(async (req) => {
     // Get account information from Binance
     const binanceUrl = `https://api.binance.com/api/v3/account?${queryString}&signature=${signatureHex}`
     
+    console.log('Making request to Binance API...')
+    
     const response = await fetch(binanceUrl, {
       headers: {
         'X-MBX-APIKEY': apiKey
@@ -80,11 +90,55 @@ serve(async (req) => {
     })
 
     const data = await response.json()
+    console.log('Binance API Response status:', response.status)
     console.log('Binance API Response:', data)
 
-    if (response.ok && data.balances) {
+    if (!response.ok) {
+      console.error('Binance API Error:', data)
+      
+      let errorMessage = 'Erro na API da Binance'
+      let details = data
+      
+      if (data.code === -2015) {
+        errorMessage = 'Credenciais da Binance inválidas'
+        details = 'Verifique se sua API Key e Secret Key estão corretas e se têm as permissões necessárias (Spot Trading habilitado)'
+      } else if (data.code === -1021) {
+        errorMessage = 'Erro de sincronização de tempo'
+        details = 'Problema de timestamp. Tente novamente em alguns segundos.'
+      }
+      
+      return new Response(
+        JSON.stringify({ 
+          error: errorMessage,
+          details: details,
+          binanceError: data
+        }),
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
+    if (data.balances) {
       // Get current crypto prices to convert to USDT
+      console.log('Fetching crypto prices...')
       const pricesResponse = await fetch('https://api.binance.com/api/v3/ticker/price')
+      
+      if (!pricesResponse.ok) {
+        console.error('Failed to fetch prices')
+        return new Response(
+          JSON.stringify({ 
+            error: 'Erro ao buscar preços das criptomoedas',
+            details: 'Não foi possível obter os preços atuais'
+          }),
+          { 
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        )
+      }
+      
       const prices = await pricesResponse.json()
       
       // Create a price map for easy lookup
@@ -152,6 +206,8 @@ serve(async (req) => {
         JSON.stringify({ 
           balance: totalBalance,
           balances: nonZeroBalances,
+          success: true,
+          message: `Saldo atualizado com sucesso: $${totalBalance.toFixed(2)} USDT`,
           debug: {
             totalAssets: data.balances.length,
             nonZeroAssets: nonZeroBalances.length,
@@ -163,9 +219,12 @@ serve(async (req) => {
         }
       )
     } else {
-      console.error('Binance API Error:', data)
+      console.error('No balances data in response')
       return new Response(
-        JSON.stringify({ error: data.msg || 'Failed to fetch balance', details: data }),
+        JSON.stringify({ 
+          error: 'Dados de saldo não encontrados',
+          details: 'A resposta da Binance não contém informações de saldo'
+        }),
         { 
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -176,7 +235,11 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error fetching Binance balance:', error)
     return new Response(
-      JSON.stringify({ error: 'Failed to fetch balance', details: error.message }),
+      JSON.stringify({ 
+        error: 'Erro interno do servidor',
+        details: 'Erro ao conectar com a Binance. Tente novamente.',
+        technicalDetails: error.message 
+      }),
       { 
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }

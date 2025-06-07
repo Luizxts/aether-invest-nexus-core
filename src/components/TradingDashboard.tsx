@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,7 +11,9 @@ import {
   Activity,
   Eye,
   LogOut,
-  RefreshCw
+  RefreshCw,
+  AlertTriangle,
+  Settings
 } from 'lucide-react';
 import TradingChart from './TradingChart';
 import AIStatus from './AIStatus';
@@ -34,11 +35,12 @@ const TradingDashboard: React.FC = () => {
   const [dailyPnL, setDailyPnL] = useState(0);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
   const [balanceDetails, setBalanceDetails] = useState<any>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'error' | 'checking'>('checking');
 
   useEffect(() => {
     if (user) {
       fetchUserData();
-      const interval = setInterval(fetchRealTimeData, 30000); // Atualizar a cada 30 segundos
+      const interval = setInterval(fetchRealTimeData, 30000);
       return () => clearInterval(interval);
     }
   }, [user]);
@@ -90,6 +92,8 @@ const TradingDashboard: React.FC = () => {
     if (!user) return;
 
     setIsLoadingBalance(true);
+    setConnectionStatus('checking');
+    
     try {
       console.log('Fetching balance for user:', user.id);
       
@@ -101,9 +105,30 @@ const TradingDashboard: React.FC = () => {
 
       if (response.error) {
         console.error('Error from edge function:', response.error);
+        setConnectionStatus('error');
+        
         toast({
-          title: "Erro ao buscar saldo",
-          description: `Erro: ${response.error.message || 'Erro desconhecido'}`,
+          title: "Erro ao conectar com Binance",
+          description: "Verifique suas credenciais e tente novamente",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (response.data?.error) {
+        console.error('Error from Binance API:', response.data);
+        setConnectionStatus('error');
+        
+        let errorTitle = "Erro na Binance";
+        let errorDescription = response.data.error;
+        
+        if (response.data.details) {
+          errorDescription = response.data.details;
+        }
+        
+        toast({
+          title: errorTitle,
+          description: errorDescription,
           variant: "destructive",
         });
         return;
@@ -119,6 +144,7 @@ const TradingDashboard: React.FC = () => {
         setRealTimeBalance(newBalance);
         setDailyPnL(prev => prev + pnl);
         setBalanceDetails(response.data);
+        setConnectionStatus('connected');
 
         // Atualizar no banco de dados
         await supabase
@@ -130,27 +156,44 @@ const TradingDashboard: React.FC = () => {
             last_updated: new Date().toISOString()
           });
 
-        toast({
-          title: "Saldo atualizado",
-          description: `Saldo atual: $${newBalance.toFixed(2)} USDT`,
-        });
+        if (response.data.message) {
+          toast({
+            title: "Saldo atualizado!",
+            description: response.data.message,
+          });
+        }
       } else {
         console.error('No balance data received:', response.data);
+        setConnectionStatus('error');
         toast({
-          title: "Erro ao buscar saldo",
+          title: "Erro de dados",
           description: "Não foi possível obter o saldo da Binance",
           variant: "destructive",
         });
       }
     } catch (error) {
       console.error('Error fetching real-time data:', error);
+      setConnectionStatus('error');
       toast({
         title: "Erro de conexão",
-        description: "Erro ao conectar com a Binance. Verifique suas credenciais.",
+        description: "Erro ao conectar com a Binance. Tente novamente.",
         variant: "destructive",
       });
     } finally {
       setIsLoadingBalance(false);
+    }
+  };
+
+  const goToSetup = () => {
+    // Redirect to setup by clearing credentials and refreshing
+    if (user) {
+      supabase
+        .from('user_binance_credentials')
+        .update({ is_active: false })
+        .eq('user_id', user.id)
+        .then(() => {
+          window.location.reload();
+        });
     }
   };
 
@@ -206,10 +249,19 @@ const TradingDashboard: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4">
-            <Badge variant="outline" className="border-neon-green text-neon-green">
-              <Eye className="w-4 h-4 mr-2" />
-              Binance Conectada (Real)
-            </Badge>
+            {connectionStatus === 'connected' && (
+              <Badge variant="outline" className="border-neon-green text-neon-green">
+                <Eye className="w-4 h-4 mr-2" />
+                Binance Conectada
+              </Badge>
+            )}
+            
+            {connectionStatus === 'error' && (
+              <Badge variant="outline" className="border-red-500 text-red-500">
+                <AlertTriangle className="w-4 h-4 mr-2" />
+                Erro de Conexão
+              </Badge>
+            )}
             
             <Button
               onClick={fetchRealTimeData}
@@ -221,6 +273,18 @@ const TradingDashboard: React.FC = () => {
               <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingBalance ? 'animate-spin' : ''}`} />
               {isLoadingBalance ? 'Atualizando...' : 'Atualizar Saldo'}
             </Button>
+
+            {connectionStatus === 'error' && (
+              <Button
+                onClick={goToSetup}
+                variant="outline"
+                size="sm"
+                className="border-yellow-500 text-yellow-500 hover:bg-yellow-500/10"
+              >
+                <Settings className="w-4 h-4 mr-2" />
+                Reconfigurar Binance
+              </Button>
+            )}
 
             <Button
               onClick={toggleTrading}
@@ -259,8 +323,15 @@ const TradingDashboard: React.FC = () => {
                       {balanceDetails.debug.nonZeroAssets} ativos
                     </p>
                   )}
+                  {connectionStatus === 'error' && (
+                    <p className="text-xs text-red-400">
+                      Erro de conexão
+                    </p>
+                  )}
                 </div>
-                <DollarSign className="w-8 h-8 text-neon-blue" />
+                <DollarSign className={`w-8 h-8 ${
+                  connectionStatus === 'connected' ? 'text-neon-blue' : 'text-gray-500'
+                }`} />
               </div>
             </CardContent>
           </Card>
