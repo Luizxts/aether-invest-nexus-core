@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -13,7 +14,9 @@ import {
   LogOut,
   RefreshCw,
   AlertTriangle,
-  Settings
+  Settings,
+  Key,
+  X
 } from 'lucide-react';
 import TradingChart from './TradingChart';
 import AIStatus from './AIStatus';
@@ -35,7 +38,9 @@ const TradingDashboard: React.FC = () => {
   const [dailyPnL, setDailyPnL] = useState(0);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
   const [balanceDetails, setBalanceDetails] = useState<any>(null);
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'error' | 'checking'>('checking');
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'error' | 'checking' | 'no-credentials'>('checking');
+  const [hasCredentials, setHasCredentials] = useState(false);
+  const [showCredentialsAlert, setShowCredentialsAlert] = useState(true);
 
   useEffect(() => {
     if (user) {
@@ -57,6 +62,19 @@ const TradingDashboard: React.FC = () => {
         .single();
 
       setUserProfile(profile);
+
+      // Verificar credenciais da Binance
+      const { data: credentials } = await supabase
+        .from('user_binance_credentials')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single();
+
+      setHasCredentials(!!credentials);
+      if (!credentials) {
+        setConnectionStatus('no-credentials');
+      }
 
       // Buscar dados do portfólio
       const { data: portfolio } = await supabase
@@ -80,8 +98,10 @@ const TradingDashboard: React.FC = () => {
 
       setRiskSettings(risk);
 
-      // Buscar saldo inicial da Binance
-      await fetchRealTimeData();
+      // Buscar saldo inicial da Binance apenas se tem credenciais
+      if (credentials) {
+        await fetchRealTimeData();
+      }
 
     } catch (error) {
       console.error('Error fetching user data:', error);
@@ -89,7 +109,10 @@ const TradingDashboard: React.FC = () => {
   };
 
   const fetchRealTimeData = async () => {
-    if (!user) return;
+    if (!user || !hasCredentials) {
+      setConnectionStatus('no-credentials');
+      return;
+    }
 
     setIsLoadingBalance(true);
     setConnectionStatus('checking');
@@ -184,21 +207,17 @@ const TradingDashboard: React.FC = () => {
     }
   };
 
-  const goToSetup = () => {
-    // Redirect to setup by clearing credentials and refreshing
-    if (user) {
-      supabase
-        .from('user_binance_credentials')
-        .update({ is_active: false })
-        .eq('user_id', user.id)
-        .then(() => {
-          window.location.reload();
-        });
-    }
-  };
-
   const toggleTrading = async () => {
     if (!user || !riskSettings) return;
+
+    if (!hasCredentials) {
+      toast({
+        title: "Credenciais necessárias",
+        description: "Configure suas credenciais da Binance primeiro",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const newTradingState = !riskSettings.is_trading_active;
 
@@ -234,8 +253,65 @@ const TradingDashboard: React.FC = () => {
     );
   }
 
+  const getStatusBadge = () => {
+    if (!hasCredentials) {
+      return (
+        <Badge variant="outline" className="border-yellow-500 text-yellow-500">
+          <Key className="w-4 h-4 mr-2" />
+          Configure API
+        </Badge>
+      );
+    }
+    
+    if (connectionStatus === 'connected') {
+      return (
+        <Badge variant="outline" className="border-neon-green text-neon-green">
+          <Eye className="w-4 h-4 mr-2" />
+          Binance Conectada
+        </Badge>
+      );
+    }
+    
+    if (connectionStatus === 'error') {
+      return (
+        <Badge variant="outline" className="border-red-500 text-red-500">
+          <AlertTriangle className="w-4 h-4 mr-2" />
+          Erro de Conexão
+        </Badge>
+      );
+    }
+
+    return (
+      <Badge variant="outline" className="border-gray-500 text-gray-500">
+        <AlertTriangle className="w-4 h-4 mr-2" />
+        Verificando...
+      </Badge>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-matrix-dark p-4 matrix-effect">
+      {/* Alert de credenciais não configuradas */}
+      {!hasCredentials && showCredentialsAlert && (
+        <Alert className="mb-6 border-yellow-500/50 bg-yellow-500/10">
+          <Key className="h-4 w-4 text-yellow-500" />
+          <AlertDescription className="text-yellow-200 flex items-center justify-between">
+            <span>
+              <strong>Configure suas credenciais da Binance</strong> para começar a operar. 
+              Vá na aba "Configurações" para inserir sua API Key e Secret Key.
+            </span>
+            <Button
+              onClick={() => setShowCredentialsAlert(false)}
+              variant="ghost"
+              size="sm"
+              className="text-yellow-300 hover:text-yellow-100 ml-4"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
@@ -249,23 +325,11 @@ const TradingDashboard: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4">
-            {connectionStatus === 'connected' && (
-              <Badge variant="outline" className="border-neon-green text-neon-green">
-                <Eye className="w-4 h-4 mr-2" />
-                Binance Conectada
-              </Badge>
-            )}
-            
-            {connectionStatus === 'error' && (
-              <Badge variant="outline" className="border-red-500 text-red-500">
-                <AlertTriangle className="w-4 h-4 mr-2" />
-                Erro de Conexão
-              </Badge>
-            )}
+            {getStatusBadge()}
             
             <Button
               onClick={fetchRealTimeData}
-              disabled={isLoadingBalance}
+              disabled={isLoadingBalance || !hasCredentials}
               variant="outline"
               size="sm"
               className="border-neon-blue text-neon-blue hover:bg-neon-blue/10"
@@ -274,25 +338,14 @@ const TradingDashboard: React.FC = () => {
               {isLoadingBalance ? 'Atualizando...' : 'Atualizar Saldo'}
             </Button>
 
-            {connectionStatus === 'error' && (
-              <Button
-                onClick={goToSetup}
-                variant="outline"
-                size="sm"
-                className="border-yellow-500 text-yellow-500 hover:bg-yellow-500/10"
-              >
-                <Settings className="w-4 h-4 mr-2" />
-                Reconfigurar Binance
-              </Button>
-            )}
-
             <Button
               onClick={toggleTrading}
+              disabled={!hasCredentials}
               className={`${
                 riskSettings.is_trading_active 
                   ? 'bg-red-600 hover:bg-red-700' 
                   : 'bg-green-600 hover:bg-green-700'
-              } text-white`}
+              } text-white ${!hasCredentials ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {riskSettings.is_trading_active ? 'Parar Trading' : 'Iniciar Trading'}
             </Button>
@@ -323,14 +376,14 @@ const TradingDashboard: React.FC = () => {
                       {balanceDetails.debug.nonZeroAssets} ativos
                     </p>
                   )}
-                  {connectionStatus === 'error' && (
-                    <p className="text-xs text-red-400">
-                      Erro de conexão
+                  {!hasCredentials && (
+                    <p className="text-xs text-yellow-400">
+                      Configure API first
                     </p>
                   )}
                 </div>
                 <DollarSign className={`w-8 h-8 ${
-                  connectionStatus === 'connected' ? 'text-neon-blue' : 'text-gray-500'
+                  hasCredentials && connectionStatus === 'connected' ? 'text-neon-blue' : 'text-gray-500'
                 }`} />
               </div>
             </CardContent>
@@ -376,13 +429,13 @@ const TradingDashboard: React.FC = () => {
                 <div>
                   <p className="text-sm text-gray-400">Status</p>
                   <p className={`text-lg font-bold ${
-                    riskSettings.is_trading_active ? 'text-neon-green' : 'text-gray-400'
+                    riskSettings.is_trading_active && hasCredentials ? 'text-neon-green' : 'text-gray-400'
                   }`}>
-                    {riskSettings.is_trading_active ? 'Ativo' : 'Parado'}
+                    {riskSettings.is_trading_active && hasCredentials ? 'Ativo' : 'Parado'}
                   </p>
                 </div>
                 <Activity className={`w-8 h-8 ${
-                  riskSettings.is_trading_active ? 'text-neon-green animate-pulse' : 'text-gray-400'
+                  riskSettings.is_trading_active && hasCredentials ? 'text-neon-green animate-pulse' : 'text-gray-400'
                 }`} />
               </div>
             </CardContent>
@@ -409,7 +462,6 @@ const TradingDashboard: React.FC = () => {
               <TradingModeSelector 
                 mode={riskSettings.trading_mode} 
                 onModeChange={(mode) => {
-                  // Atualizar no banco de dados
                   supabase
                     .from('risk_settings')
                     .update({ trading_mode: mode })
@@ -417,6 +469,7 @@ const TradingDashboard: React.FC = () => {
                   setRiskSettings({...riskSettings, trading_mode: mode});
                 }}
                 isTrading={riskSettings.is_trading_active}
+                hasCredentials={hasCredentials}
               />
               <PortfolioOverview balance={realTimeBalance} pnl={dailyPnL} />
             </div>
@@ -430,7 +483,7 @@ const TradingDashboard: React.FC = () => {
         <TabsContent value="ai-status" className="space-y-4">
           <AIStatus 
             level={riskSettings.ai_level} 
-            isActive={riskSettings.is_trading_active}
+            isActive={riskSettings.is_trading_active && hasCredentials}
             mode={riskSettings.trading_mode}
           />
         </TabsContent>
@@ -443,7 +496,6 @@ const TradingDashboard: React.FC = () => {
           <RiskSettings 
             settings={riskSettings}
             onSettingsChange={(newSettings) => {
-              // Atualizar no banco de dados
               supabase
                 .from('risk_settings')
                 .update(newSettings)
