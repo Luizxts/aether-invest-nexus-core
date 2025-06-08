@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -8,10 +7,23 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Settings, Shield, AlertTriangle, Key, Eye, EyeOff, CheckCircle, XCircle } from 'lucide-react';
+import { 
+  Settings, 
+  Shield, 
+  AlertTriangle, 
+  Key, 
+  Eye, 
+  EyeOff, 
+  CheckCircle, 
+  XCircle, 
+  Play, 
+  Trash2,
+  BookOpen
+} from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import DeleteAccountDialog from './DeleteAccountDialog';
 
 interface RiskSettingsProps {
   settings: {
@@ -33,9 +45,12 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
   });
   const [hasCredentials, setHasCredentials] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [aiEvolution, setAiEvolution] = useState<any>(null);
 
   useEffect(() => {
     checkExistingCredentials();
+    fetchAiEvolution();
   }, [user]);
 
   const checkExistingCredentials = async () => {
@@ -52,6 +67,24 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
       setHasCredentials(!!data && !error);
     } catch (err) {
       setHasCredentials(false);
+    }
+  };
+
+  const fetchAiEvolution = async () => {
+    if (!user) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('ai_evolution')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+
+      if (data && !error) {
+        setAiEvolution(data);
+      }
+    } catch (err) {
+      console.error('Error fetching AI evolution:', err);
     }
   };
 
@@ -126,6 +159,36 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
 
     } catch (error) {
       console.error('Erro ao remover credenciais:', error);
+    }
+  };
+
+  const handleShowTutorial = async () => {
+    if (!user) return;
+
+    try {
+      // Reset tutorial status to show it again
+      await supabase
+        .from('profiles')
+        .update({ has_seen_tutorial: false })
+        .eq('id', user.id);
+
+      toast({
+        title: "Tutorial ativado!",
+        description: "Recarregue a página para ver o tutorial novamente",
+      });
+
+      // Reload the page to show tutorial
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+
+    } catch (error) {
+      console.error('Error resetting tutorial:', error);
+      toast({
+        title: "Erro",
+        description: "Erro ao ativar tutorial. Tente novamente.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -318,6 +381,58 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
         </CardContent>
       </Card>
 
+      {/* Tutorial e Conta */}
+      <Card className="cyber-card">
+        <CardHeader>
+          <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
+            <BookOpen className="w-6 h-6 text-neon-blue" />
+            Tutorial e Conta
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-4">
+            <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+              <h4 className="font-semibold text-blue-300 mb-3">📚 Tutorial</h4>
+              <p className="text-sm text-blue-200 mb-3">
+                Perdeu alguma parte do tutorial ou quer revisar as funcionalidades?
+              </p>
+              <Button
+                onClick={handleShowTutorial}
+                variant="outline"
+                className="border-blue-500 text-blue-300 hover:bg-blue-500/10"
+              >
+                <Play className="w-4 h-4 mr-2" />
+                Mostrar Tutorial Novamente
+              </Button>
+            </div>
+
+            <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+              <h4 className="font-semibold text-red-300 mb-3">⚠️ Zona de Perigo</h4>
+              <p className="text-sm text-red-200 mb-3">
+                Excluir sua conta removerá todos os dados e o progresso da IA será perdido.
+              </p>
+              {aiEvolution && (
+                <div className="mb-3 p-3 bg-gray-800/50 rounded border border-gray-600">
+                  <p className="text-xs text-gray-300">Seu progresso atual:</p>
+                  <div className="flex gap-4 mt-1">
+                    <span className="text-neon-purple font-bold">IA Nível {aiEvolution.ai_level}</span>
+                    <span className="text-neon-blue">{aiEvolution.total_trades} trades</span>
+                  </div>
+                </div>
+              )}
+              <Button
+                onClick={() => setShowDeleteDialog(true)}
+                variant="outline"
+                className="border-red-500 text-red-300 hover:bg-red-500/10"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Excluir Conta
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Configurações Avançadas */}
       <Card className="cyber-card">
         <CardHeader>
@@ -351,6 +466,14 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
           </div>
         </CardContent>
       </Card>
+
+      {/* Delete Account Dialog */}
+      <DeleteAccountDialog
+        isOpen={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        aiLevel={aiEvolution?.ai_level || 1}
+        totalTrades={aiEvolution?.total_trades || 0}
+      />
     </div>
   );
 };

@@ -9,6 +9,45 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      ai_evolution: {
+        Row: {
+          ai_level: number
+          created_at: string
+          evolution_stage: string
+          experience_points: number
+          id: string
+          successful_trades: number
+          total_profit: number
+          total_trades: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_level?: number
+          created_at?: string
+          evolution_stage?: string
+          experience_points?: number
+          id?: string
+          successful_trades?: number
+          total_profit?: number
+          total_trades?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_level?: number
+          created_at?: string
+          evolution_stage?: string
+          experience_points?: number
+          id?: string
+          successful_trades?: number
+          total_profit?: number
+          total_trades?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       portfolio_data: {
         Row: {
           daily_pnl: number
