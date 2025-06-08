@@ -9,12 +9,14 @@ interface TradingModeSelectorProps {
   mode: 'safe' | 'danger';
   onModeChange: (mode: 'safe' | 'danger') => void;
   isTrading: boolean;
+  hasCredentials: boolean;
 }
 
 const TradingModeSelector: React.FC<TradingModeSelectorProps> = ({
   mode,
   onModeChange,
-  isTrading
+  isTrading,
+  hasCredentials
 }) => {
   return (
     <Card className="cyber-card">
@@ -35,9 +37,9 @@ const TradingModeSelector: React.FC<TradingModeSelectorProps> = ({
                     mode === 'safe' 
                       ? 'safe-mode' 
                       : 'bg-gray-800/50 border-gray-600 text-gray-300 hover:bg-gray-700/50'
-                  } ${isTrading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onClick={() => !isTrading && onModeChange('safe')}
-                  disabled={isTrading}
+                  } ${(isTrading || !hasCredentials) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  onClick={() => (!isTrading && hasCredentials) && onModeChange('safe')}
+                  disabled={isTrading || !hasCredentials}
                 >
                   <Shield className="w-8 h-8" />
                   <div className="text-center">
@@ -67,9 +69,9 @@ const TradingModeSelector: React.FC<TradingModeSelectorProps> = ({
                     mode === 'danger' 
                       ? 'danger-mode' 
                       : 'bg-gray-800/50 border-gray-600 text-gray-300 hover:bg-gray-700/50'
-                  } ${isTrading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onClick={() => !isTrading && onModeChange('danger')}
-                  disabled={isTrading}
+                  } ${(isTrading || !hasCredentials) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  onClick={() => (!isTrading && hasCredentials) && onModeChange('danger')}
+                  disabled={isTrading || !hasCredentials}
                 >
                   <AlertTriangle className="w-8 h-8" />
                   <div className="text-center">
@@ -95,9 +97,11 @@ const TradingModeSelector: React.FC<TradingModeSelectorProps> = ({
 
         <div className="p-3 bg-gray-800/30 rounded-lg border border-gray-700/50">
           <p className="text-xs text-gray-400 text-center">
-            {isTrading 
-              ? '⚠️ Modo bloqueado durante trading ativo'
-              : '💡 Escolha o modo antes de iniciar o trading'
+            {!hasCredentials 
+              ? '🔑 Configure as credenciais da Binance primeiro'
+              : isTrading 
+                ? '⚠️ Modo bloqueado durante trading ativo'
+                : '💡 Escolha o modo antes de iniciar o trading'
             }
           </p>
         </div>

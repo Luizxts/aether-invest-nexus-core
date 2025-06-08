@@ -36,18 +36,21 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string
+          has_seen_tutorial: boolean
           id: string
           updated_at: string
           username: string | null
         }
         Insert: {
           created_at?: string
+          has_seen_tutorial?: boolean
           id: string
           updated_at?: string
           username?: string | null
         }
         Update: {
           created_at?: string
+          has_seen_tutorial?: boolean
           id?: string
           updated_at?: string
           username?: string | null

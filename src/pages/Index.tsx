@@ -28,12 +28,20 @@ const AppContent = () => {
         .eq('id', user.id)
         .single();
 
+      if (error) {
+        console.error('Error checking tutorial status:', error);
+        // If there's an error, show tutorial by default
+        setShowTutorial(true);
+        return;
+      }
+
       if (data && !data.has_seen_tutorial) {
         setShowTutorial(true);
       } else {
         setHasSeenTutorial(true);
       }
     } catch (err) {
+      console.error('Error in checkTutorialStatus:', err);
       // If tutorial status doesn't exist, show tutorial
       setShowTutorial(true);
     }
@@ -41,10 +49,18 @@ const AppContent = () => {
 
   const handleTutorialComplete = async (skipped = false) => {
     if (user) {
-      await supabase
-        .from('profiles')
-        .update({ has_seen_tutorial: true })
-        .eq('id', user.id);
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ has_seen_tutorial: true })
+          .eq('id', user.id);
+        
+        if (error) {
+          console.error('Error updating tutorial status:', error);
+        }
+      } catch (err) {
+        console.error('Error in handleTutorialComplete:', err);
+      }
     }
     setShowTutorial(false);
     setHasSeenTutorial(true);
