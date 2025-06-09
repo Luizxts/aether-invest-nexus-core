@@ -16,7 +16,8 @@ import {
   AlertTriangle,
   Settings,
   Key,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 import TradingChart from './TradingChart';
 import AIStatus from './AIStatus';
@@ -48,6 +49,31 @@ const TradingDashboard: React.FC = () => {
       const interval = setInterval(fetchRealTimeData, 30000);
       return () => clearInterval(interval);
     }
+  }, [user]);
+
+  // Escutar mudanças na tabela portfolio_data para atualizar em tempo real
+  useEffect(() => {
+    if (!user) return;
+
+    const subscription = supabase
+      .channel('portfolio_updates')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'portfolio_data',
+        filter: `user_id=eq.${user.id}`
+      }, (payload) => {
+        console.log('Portfolio updated:', payload);
+        if (payload.new) {
+          setRealTimeBalance(Number(payload.new.total_balance));
+          setDailyPnL(Number(payload.new.daily_pnl));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [user]);
 
   const fetchUserData = async () => {
@@ -283,7 +309,7 @@ const TradingDashboard: React.FC = () => {
 
     return (
       <Badge variant="outline" className="border-gray-500 text-gray-500">
-        <AlertTriangle className="w-4 h-4 mr-2" />
+        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
         Verificando...
       </Badge>
     );
@@ -379,6 +405,12 @@ const TradingDashboard: React.FC = () => {
                   {!hasCredentials && (
                     <p className="text-xs text-yellow-400">
                       Configure API first
+                    </p>
+                  )}
+                  {isLoadingBalance && (
+                    <p className="text-xs text-blue-400 flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Atualizando...
                     </p>
                   )}
                 </div>

@@ -18,7 +18,8 @@ import {
   XCircle, 
   Play, 
   Trash2,
-  BookOpen
+  BookOpen,
+  Loader2
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -45,6 +46,8 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
   });
   const [hasCredentials, setHasCredentials] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isValidatingAPI, setIsValidatingAPI] = useState(false);
+  const [isFetchingBalance, setIsFetchingBalance] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [aiEvolution, setAiEvolution] = useState<any>(null);
 
@@ -88,6 +91,75 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
     }
   };
 
+  const validateBinanceCredentials = async (apiKey: string, secretKey: string) => {
+    try {
+      setIsValidatingAPI(true);
+      
+      const response = await supabase.functions.invoke('validate-binance-credentials', {
+        body: { apiKey, secretKey }
+      });
+
+      if (response.error) {
+        throw new Error('Erro ao validar credenciais');
+      }
+
+      return response.data?.valid || false;
+    } catch (error) {
+      console.error('Error validating credentials:', error);
+      return false;
+    } finally {
+      setIsValidatingAPI(false);
+    }
+  };
+
+  const fetchBalanceAfterSave = async () => {
+    if (!user) return;
+
+    try {
+      setIsFetchingBalance(true);
+      
+      const response = await supabase.functions.invoke('get-binance-balance', {
+        body: { userId: user.id }
+      });
+
+      if (response.error) {
+        console.error('Error fetching balance:', response.error);
+        return;
+      }
+
+      if (response.data?.error) {
+        console.error('Binance API Error:', response.data);
+        toast({
+          title: "Aviso",
+          description: "Credenciais salvas, mas não foi possível buscar o saldo. Tente atualizar manualmente.",
+          variant: "default",
+        });
+        return;
+      }
+
+      if (response.data?.balance !== undefined) {
+        // Atualizar saldo no portfolio
+        await supabase
+          .from('portfolio_data')
+          .upsert({
+            user_id: user.id,
+            total_balance: response.data.balance,
+            daily_pnl: 0,
+            last_updated: new Date().toISOString()
+          });
+
+        toast({
+          title: "Saldo atualizado!",
+          description: `Saldo atual: $${response.data.balance.toFixed(2)} USDT`,
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching balance after save:', error);
+    } finally {
+      setIsFetchingBalance(false);
+    }
+  };
+
   const handleSaveCredentials = async () => {
     if (!user || !apiCredentials.apiKey || !apiCredentials.secretKey) {
       toast({
@@ -101,9 +173,23 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
     setIsLoading(true);
 
     try {
-      console.log('Salvando credenciais para o usuário:', user.id);
+      // Primeiro validar as credenciais
+      console.log('Validando credenciais...');
+      const isValid = await validateBinanceCredentials(apiCredentials.apiKey, apiCredentials.secretKey);
+      
+      if (!isValid) {
+        toast({
+          title: "Credenciais inválidas",
+          description: "Verifique sua API Key e Secret Key. Certifique-se de que têm permissão de trading.",
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        return;
+      }
 
-      // Use upsert to handle both insert and update cases
+      console.log('Credenciais válidas! Salvando...');
+
+      // Salvar credenciais
       const { error } = await supabase
         .from('user_binance_credentials')
         .upsert({
@@ -126,8 +212,11 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
       
       toast({
         title: "Sucesso!",
-        description: "Credenciais da Binance salvas com sucesso",
+        description: "Credenciais validadas e salvas! Buscando saldo...",
       });
+
+      // Buscar saldo automaticamente
+      await fetchBalanceAfterSave();
 
     } catch (error) {
       console.error('Erro ao salvar credenciais:', error);
@@ -208,6 +297,8 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
     });
   };
 
+  const isProcessing = isLoading || isValidatingAPI || isFetchingBalance;
+
   return (
     <div className="space-y-6">
       {/* Configuração da API Binance */}
@@ -246,6 +337,18 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
             </Alert>
           )}
 
+          {/* Status de processamento */}
+          {isProcessing && (
+            <Alert className="border-blue-500/50 bg-blue-500/10">
+              <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+              <AlertDescription className="text-blue-200">
+                {isValidatingAPI && "🔍 Validando credenciais com a Binance..."}
+                {isLoading && !isValidatingAPI && !isFetchingBalance && "💾 Salvando credenciais..."}
+                {isFetchingBalance && "💰 Buscando saldo atual..."}
+              </AlertDescription>
+            </Alert>
+          )}
+
           <div className="space-y-4">
             <div className="space-y-3">
               <Label className="text-gray-300">API Key da Binance</Label>
@@ -256,6 +359,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
                   onChange={(e) => setApiCredentials({...apiCredentials, apiKey: e.target.value})}
                   placeholder="Sua API Key da Binance"
                   className="bg-gray-800/50 border-gray-600 text-white pr-10"
+                  disabled={isProcessing}
                 />
                 <button
                   type="button"
@@ -276,6 +380,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
                   onChange={(e) => setApiCredentials({...apiCredentials, secretKey: e.target.value})}
                   placeholder="Sua Secret Key da Binance"
                   className="bg-gray-800/50 border-gray-600 text-white pr-10"
+                  disabled={isProcessing}
                 />
                 <button
                   type="button"
@@ -290,10 +395,18 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
             <div className="flex gap-2">
               <Button
                 onClick={handleSaveCredentials}
-                disabled={isLoading || !apiCredentials.apiKey || !apiCredentials.secretKey}
+                disabled={isProcessing || !apiCredentials.apiKey || !apiCredentials.secretKey}
                 className="cyber-button flex-1"
               >
-                {isLoading ? 'Salvando...' : 'Salvar Credenciais'}
+                {isProcessing ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {isValidatingAPI ? 'Validando...' : 
+                     isFetchingBalance ? 'Buscando saldo...' : 'Salvando...'}
+                  </div>
+                ) : (
+                  'Validar & Salvar'
+                )}
               </Button>
               
               {hasCredentials && (
@@ -301,6 +414,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
                   onClick={handleRemoveCredentials}
                   variant="outline"
                   className="border-red-500 text-red-500 hover:bg-red-500/10"
+                  disabled={isProcessing}
                 >
                   Remover
                 </Button>
