@@ -16,7 +16,7 @@ serve(async (req) => {
 
     if (!userId) {
       return new Response(
-        JSON.stringify({ error: 'User ID is required' }),
+        JSON.stringify({ error: 'User ID é obrigatório' }),
         { 
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -26,7 +26,6 @@ serve(async (req) => {
 
     console.log('Fetching credentials for user:', userId)
 
-    // Create Supabase client with service key
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     // Get user's Binance credentials
@@ -42,7 +41,7 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           error: 'Credenciais da Binance não encontradas',
-          details: 'Configure suas credenciais da Binance primeiro'
+          details: 'Configure suas credenciais da Binance primeiro na aba Configurações'
         }),
         { 
           status: 404,
@@ -55,7 +54,7 @@ serve(async (req) => {
     
     console.log('Testing Binance connection with API Key:', apiKey.substring(0, 8) + '...')
 
-    // Test connection first with account info
+    // Create signature for account endpoint
     const timestamp = Date.now()
     const queryString = `timestamp=${timestamp}`
     
@@ -91,20 +90,24 @@ serve(async (req) => {
 
     const data = await response.json()
     console.log('Binance API Response status:', response.status)
-    console.log('Binance API Response:', data)
 
     if (!response.ok) {
       console.error('Binance API Error:', data)
       
       let errorMessage = 'Erro na API da Binance'
-      let details = data
+      let details = 'Erro desconhecido'
       
       if (data.code === -2015) {
         errorMessage = 'Credenciais da Binance inválidas'
-        details = 'Verifique se sua API Key e Secret Key estão corretas e se têm as permissões necessárias (Spot Trading habilitado)'
+        details = 'Verifique se sua API Key e Secret Key estão corretas e se têm permissão "Spot & Margin Trading" habilitada. Também verifique se o IP está na whitelist se você configurou restrições de IP.'
       } else if (data.code === -1021) {
         errorMessage = 'Erro de sincronização de tempo'
         details = 'Problema de timestamp. Tente novamente em alguns segundos.'
+      } else if (data.code === -1022) {
+        errorMessage = 'Assinatura inválida'
+        details = 'Problema com a Secret Key. Verifique se está correta.'
+      } else if (data.msg) {
+        details = data.msg
       }
       
       return new Response(
@@ -120,105 +123,7 @@ serve(async (req) => {
       )
     }
 
-    if (data.balances) {
-      // Get current crypto prices to convert to USDT
-      console.log('Fetching crypto prices...')
-      const pricesResponse = await fetch('https://api.binance.com/api/v3/ticker/price')
-      
-      if (!pricesResponse.ok) {
-        console.error('Failed to fetch prices')
-        return new Response(
-          JSON.stringify({ 
-            error: 'Erro ao buscar preços das criptomoedas',
-            details: 'Não foi possível obter os preços atuais'
-          }),
-          { 
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          }
-        )
-      }
-      
-      const prices = await pricesResponse.json()
-      
-      // Create a price map for easy lookup
-      const priceMap = new Map()
-      prices.forEach((price: any) => {
-        priceMap.set(price.symbol, parseFloat(price.price))
-      })
-      
-      let totalBalance = 0
-      const nonZeroBalances = []
-      
-      // Process all balances
-      for (const balance of data.balances) {
-        const asset = balance.asset
-        const free = parseFloat(balance.free)
-        const locked = parseFloat(balance.locked)
-        const total = free + locked
-        
-        if (total > 0) {
-          nonZeroBalances.push({
-            asset,
-            free: free.toString(),
-            locked: locked.toString(),
-            total: total.toString()
-          })
-          
-          if (asset === 'USDT') {
-            // USDT is already in USDT value
-            totalBalance += total
-            console.log(`${asset}: ${total} USDT (direct)`)
-          } else {
-            // Convert other assets to USDT
-            const usdtSymbol = `${asset}USDT`
-            const btcSymbol = `${asset}BTC`
-            
-            let usdtValue = 0
-            
-            // Try direct conversion to USDT
-            if (priceMap.has(usdtSymbol)) {
-              usdtValue = total * priceMap.get(usdtSymbol)
-              console.log(`${asset}: ${total} * ${priceMap.get(usdtSymbol)} = ${usdtValue} USDT`)
-            }
-            // Try conversion via BTC
-            else if (priceMap.has(btcSymbol) && priceMap.has('BTCUSDT')) {
-              const btcPrice = priceMap.get(btcSymbol)
-              const btcToUsdt = priceMap.get('BTCUSDT')
-              usdtValue = total * btcPrice * btcToUsdt
-              console.log(`${asset}: ${total} * ${btcPrice} * ${btcToUsdt} = ${usdtValue} USDT (via BTC)`)
-            }
-            // If it's BTC, convert directly
-            else if (asset === 'BTC' && priceMap.has('BTCUSDT')) {
-              usdtValue = total * priceMap.get('BTCUSDT')
-              console.log(`${asset}: ${total} * ${priceMap.get('BTCUSDT')} = ${usdtValue} USDT`)
-            }
-            
-            totalBalance += usdtValue
-          }
-        }
-      }
-
-      console.log(`Total balance calculated: ${totalBalance} USDT`)
-      console.log(`Non-zero balances:`, nonZeroBalances)
-
-      return new Response(
-        JSON.stringify({ 
-          balance: totalBalance,
-          balances: nonZeroBalances,
-          success: true,
-          message: `Saldo atualizado com sucesso: $${totalBalance.toFixed(2)} USDT`,
-          debug: {
-            totalAssets: data.balances.length,
-            nonZeroAssets: nonZeroBalances.length,
-            calculatedTotal: totalBalance
-          }
-        }),
-        { 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      )
-    } else {
+    if (!data.balances) {
       console.error('No balances data in response')
       return new Response(
         JSON.stringify({ 
@@ -232,12 +137,109 @@ serve(async (req) => {
       )
     }
 
+    console.log('Processing balances...')
+    
+    // Get current crypto prices
+    const pricesResponse = await fetch('https://api.binance.com/api/v3/ticker/price')
+    
+    if (!pricesResponse.ok) {
+      console.error('Failed to fetch prices')
+      return new Response(
+        JSON.stringify({ 
+          error: 'Erro ao buscar preços das criptomoedas',
+          details: 'Não foi possível obter os preços atuais'
+        }),
+        { 
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
+    
+    const prices = await pricesResponse.json()
+    
+    // Create a price map for easy lookup
+    const priceMap = new Map()
+    prices.forEach((price: any) => {
+      priceMap.set(price.symbol, parseFloat(price.price))
+    })
+    
+    let totalBalance = 0
+    const nonZeroBalances = []
+    
+    // Process all balances
+    for (const balance of data.balances) {
+      const asset = balance.asset
+      const free = parseFloat(balance.free)
+      const locked = parseFloat(balance.locked)
+      const total = free + locked
+      
+      if (total > 0) {
+        nonZeroBalances.push({
+          asset,
+          free: free.toString(),
+          locked: locked.toString(),
+          total: total.toString()
+        })
+        
+        if (asset === 'USDT') {
+          totalBalance += total
+          console.log(`${asset}: ${total} USDT (direct)`)
+        } else {
+          // Convert other assets to USDT
+          const usdtSymbol = `${asset}USDT`
+          const btcSymbol = `${asset}BTC`
+          
+          let usdtValue = 0
+          
+          // Try direct conversion to USDT
+          if (priceMap.has(usdtSymbol)) {
+            usdtValue = total * priceMap.get(usdtSymbol)
+            console.log(`${asset}: ${total} * ${priceMap.get(usdtSymbol)} = ${usdtValue} USDT`)
+          }
+          // Try conversion via BTC
+          else if (priceMap.has(btcSymbol) && priceMap.has('BTCUSDT')) {
+            const btcPrice = priceMap.get(btcSymbol)
+            const btcToUsdt = priceMap.get('BTCUSDT')
+            usdtValue = total * btcPrice * btcToUsdt
+            console.log(`${asset}: ${total} * ${btcPrice} * ${btcToUsdt} = ${usdtValue} USDT (via BTC)`)
+          }
+          // If it's BTC, convert directly
+          else if (asset === 'BTC' && priceMap.has('BTCUSDT')) {
+            usdtValue = total * priceMap.get('BTCUSDT')
+            console.log(`${asset}: ${total} * ${priceMap.get('BTCUSDT')} = ${usdtValue} USDT`)
+          }
+          
+          totalBalance += usdtValue
+        }
+      }
+    }
+
+    console.log(`Total balance calculated: ${totalBalance} USDT`)
+
+    return new Response(
+      JSON.stringify({ 
+        balance: totalBalance,
+        balances: nonZeroBalances,
+        success: true,
+        message: `Saldo atualizado: $${totalBalance.toFixed(2)} USDT`,
+        debug: {
+          totalAssets: data.balances.length,
+          nonZeroAssets: nonZeroBalances.length,
+          calculatedTotal: totalBalance
+        }
+      }),
+      { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    )
+
   } catch (error) {
     console.error('Error fetching Binance balance:', error)
     return new Response(
       JSON.stringify({ 
         error: 'Erro interno do servidor',
-        details: 'Erro ao conectar com a Binance. Tente novamente.',
+        details: 'Erro ao conectar com a Binance. Verifique suas credenciais e tente novamente.',
         technicalDetails: error.message 
       }),
       { 

@@ -65,7 +65,7 @@ const TradingDashboard: React.FC = () => {
         filter: `user_id=eq.${user.id}`
       }, (payload) => {
         console.log('Portfolio updated:', payload);
-        if (payload.new && typeof payload.new === 'object' && payload.new !== null) {
+        if (payload.new && typeof payload.new === 'object' && payload.new !== null && 'total_balance' in payload.new) {
           const newData = payload.new as any;
           if (newData.total_balance !== undefined) {
             setRealTimeBalance(Number(newData.total_balance));
@@ -335,7 +335,7 @@ const TradingDashboard: React.FC = () => {
           <Key className="h-4 w-4 text-yellow-500" />
           <AlertDescription className="text-yellow-200 flex items-center justify-between">
             <span>
-              <strong>Configure suas credenciais da Binance</strong> para começar a operar. 
+              <strong>Configure suas credenciais da Binance</strong> com permissão "Spot & Margin Trading" para começar a operar. 
               Vá na aba "Configurações" para inserir sua API Key e Secret Key.
             </span>
             <Button

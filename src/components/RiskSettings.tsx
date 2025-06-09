@@ -96,17 +96,38 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
     try {
       setIsValidatingAPI(true);
       
+      console.log('Validating credentials with API Key:', apiKey.substring(0, 8) + '...');
+      
       const response = await supabase.functions.invoke('validate-binance-credentials', {
         body: { apiKey, secretKey }
       });
 
+      console.log('Validation response:', response);
+
       if (response.error) {
+        console.error('Validation error:', response.error);
         throw new Error('Erro ao validar credenciais');
       }
 
-      return response.data?.valid || false;
+      if (response.data?.valid) {
+        console.log('Credentials are valid!');
+        return true;
+      } else {
+        console.error('Credentials are invalid:', response.data?.error);
+        toast({
+          title: "Credenciais inválidas",
+          description: response.data?.error || "Verifique sua API Key e Secret Key",
+          variant: "destructive",
+        });
+        return false;
+      }
     } catch (error) {
       console.error('Error validating credentials:', error);
+      toast({
+        title: "Erro de validação",
+        description: "Não foi possível validar as credenciais. Tente novamente.",
+        variant: "destructive",
+      });
       return false;
     } finally {
       setIsValidatingAPI(false);
@@ -119,21 +140,30 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
     try {
       setIsFetchingBalance(true);
       
+      console.log('Fetching balance after save...');
+      
       const response = await supabase.functions.invoke('get-binance-balance', {
         body: { userId: user.id }
       });
 
+      console.log('Balance fetch response:', response);
+
       if (response.error) {
         console.error('Error fetching balance:', response.error);
+        toast({
+          title: "Aviso",
+          description: "Credenciais salvas, mas não foi possível buscar o saldo. Tente atualizar manualmente no dashboard.",
+          variant: "default",
+        });
         return;
       }
 
       if (response.data?.error) {
         console.error('Binance API Error:', response.data);
         toast({
-          title: "Aviso",
-          description: "Credenciais salvas, mas não foi possível buscar o saldo. Tente atualizar manualmente.",
-          variant: "default",
+          title: "Erro da Binance",
+          description: response.data.details || response.data.error,
+          variant: "destructive",
         });
         return;
       }
@@ -151,11 +181,16 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
 
         toast({
           title: "Saldo atualizado!",
-          description: `Saldo atual: $${response.data.balance.toFixed(2)} USDT`,
+          description: response.data.message || `Saldo: $${response.data.balance.toFixed(2)} USDT`,
         });
       }
     } catch (error) {
       console.error('Error fetching balance after save:', error);
+      toast({
+        title: "Erro",
+        description: "Erro ao buscar saldo. Tente atualizar manualmente.",
+        variant: "destructive",
+      });
     } finally {
       setIsFetchingBalance(false);
     }
@@ -175,20 +210,15 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
 
     try {
       // Primeiro validar as credenciais
-      console.log('Validando credenciais...');
+      console.log('Validating credentials...');
       const isValid = await validateBinanceCredentials(apiCredentials.apiKey, apiCredentials.secretKey);
       
       if (!isValid) {
-        toast({
-          title: "Credenciais inválidas",
-          description: "Verifique sua API Key e Secret Key. Certifique-se de que têm permissão de trading.",
-          variant: "destructive",
-        });
         setIsLoading(false);
         return;
       }
 
-      console.log('Credenciais válidas! Salvando...');
+      console.log('Credentials valid! Saving...');
 
       // Salvar credenciais
       const { error } = await supabase
@@ -207,7 +237,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
         throw error;
       }
 
-      console.log('Credenciais salvas com sucesso');
+      console.log('Credentials saved successfully');
       setHasCredentials(true);
       setApiCredentials({ apiKey: '', secretKey: '' });
       
@@ -331,7 +361,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
             <Alert className="border-yellow-500/50 bg-yellow-500/10">
               <AlertTriangle className="h-4 w-4 text-yellow-500" />
               <AlertDescription className="text-yellow-200">
-                Configure suas credenciais da Binance para começar a operar. Sem isso, o robô não pode funcionar.
+                <strong>Importante:</strong> Configure suas credenciais da Binance com permissão "Spot & Margin Trading" para o robô funcionar.
               </AlertDescription>
             </Alert>
           ) : (
@@ -433,9 +463,12 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
                 <li>1. Acesse sua conta na Binance</li>
                 <li>2. Vá em Perfil → Segurança API</li>
                 <li>3. Crie uma nova API Key</li>
-                <li>4. Habilite "Spot & Margin Trading"</li>
+                <li>4. <strong>Habilite "Spot & Margin Trading"</strong></li>
                 <li>5. Cole aqui suas credenciais</li>
               </ol>
+              <div className="mt-2 p-2 bg-red-500/20 border border-red-500/30 rounded text-xs">
+                <strong>⚠️ Importante:</strong> Se você configurou restrição de IP, adicione o IP do servidor na whitelist ou desative a restrição.
+              </div>
             </div>
           </div>
         </CardContent>
