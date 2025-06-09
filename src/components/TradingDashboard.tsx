@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -64,9 +65,14 @@ const TradingDashboard: React.FC = () => {
         filter: `user_id=eq.${user.id}`
       }, (payload) => {
         console.log('Portfolio updated:', payload);
-        if (payload.new) {
-          setRealTimeBalance(Number(payload.new.total_balance));
-          setDailyPnL(Number(payload.new.daily_pnl));
+        if (payload.new && typeof payload.new === 'object' && payload.new !== null) {
+          const newData = payload.new as any;
+          if (newData.total_balance !== undefined) {
+            setRealTimeBalance(Number(newData.total_balance));
+          }
+          if (newData.daily_pnl !== undefined) {
+            setDailyPnL(Number(newData.daily_pnl));
+          }
         }
       })
       .subscribe();
@@ -262,6 +268,12 @@ const TradingDashboard: React.FC = () => {
     } catch (error) {
       console.error('Error toggling trading:', error);
     }
+  };
+
+  const handleCredentialsUpdated = () => {
+    setHasCredentials(true);
+    setConnectionStatus('checking');
+    fetchRealTimeData();
   };
 
   const handleSignOut = async () => {
@@ -534,6 +546,7 @@ const TradingDashboard: React.FC = () => {
                 .eq('user_id', user?.id);
               setRiskSettings(newSettings);
             }}
+            onCredentialsUpdated={handleCredentialsUpdated}
           />
         </TabsContent>
       </Tabs>
