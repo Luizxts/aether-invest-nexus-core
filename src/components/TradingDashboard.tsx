@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,7 +14,6 @@ import {
   LogOut,
   RefreshCw,
   AlertTriangle,
-  Settings,
   Key,
   X,
   Loader2
@@ -52,7 +50,6 @@ const TradingDashboard: React.FC = () => {
     }
   }, [user]);
 
-  // Escutar mudanças na tabela portfolio_data para atualizar em tempo real
   useEffect(() => {
     if (!user) return;
 
@@ -65,12 +62,12 @@ const TradingDashboard: React.FC = () => {
         filter: `user_id=eq.${user.id}`
       }, (payload) => {
         console.log('Portfolio updated:', payload);
-        if (payload.new && typeof payload.new === 'object' && payload.new !== null && 'total_balance' in payload.new) {
-          const newData = payload.new as any;
-          if (newData.total_balance !== undefined) {
+        if (payload.new && typeof payload.new === 'object' && payload.new !== null) {
+          const newData = payload.new as Record<string, any>;
+          if ('total_balance' in newData && newData.total_balance !== undefined) {
             setRealTimeBalance(Number(newData.total_balance));
           }
-          if (newData.daily_pnl !== undefined) {
+          if ('daily_pnl' in newData && newData.daily_pnl !== undefined) {
             setDailyPnL(Number(newData.daily_pnl));
           }
         }
@@ -86,7 +83,6 @@ const TradingDashboard: React.FC = () => {
     if (!user) return;
 
     try {
-      // Buscar perfil do usuário
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
@@ -95,7 +91,6 @@ const TradingDashboard: React.FC = () => {
 
       setUserProfile(profile);
 
-      // Verificar credenciais da Binance
       const { data: credentials } = await supabase
         .from('user_binance_credentials')
         .select('id')
@@ -108,7 +103,6 @@ const TradingDashboard: React.FC = () => {
         setConnectionStatus('no-credentials');
       }
 
-      // Buscar dados do portfólio
       const { data: portfolio } = await supabase
         .from('portfolio_data')
         .select('*')
@@ -121,7 +115,6 @@ const TradingDashboard: React.FC = () => {
         setDailyPnL(Number(portfolio.daily_pnl));
       }
 
-      // Buscar configurações de risco
       const { data: risk } = await supabase
         .from('risk_settings')
         .select('*')
@@ -130,7 +123,6 @@ const TradingDashboard: React.FC = () => {
 
       setRiskSettings(risk);
 
-      // Buscar saldo inicial da Binance apenas se tem credenciais
       if (credentials) {
         await fetchRealTimeData();
       }
@@ -201,7 +193,6 @@ const TradingDashboard: React.FC = () => {
         setBalanceDetails(response.data);
         setConnectionStatus('connected');
 
-        // Atualizar no banco de dados
         await supabase
           .from('portfolio_data')
           .upsert({

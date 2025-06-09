@@ -169,7 +169,6 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
       }
 
       if (response.data?.balance !== undefined) {
-        // Atualizar saldo no portfolio
         await supabase
           .from('portfolio_data')
           .upsert({
@@ -209,7 +208,6 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
     setIsLoading(true);
 
     try {
-      // Primeiro validar as credenciais
       console.log('Validating credentials...');
       const isValid = await validateBinanceCredentials(apiCredentials.apiKey, apiCredentials.secretKey);
       
@@ -220,7 +218,6 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
 
       console.log('Credentials valid! Saving...');
 
-      // Salvar credenciais
       const { error } = await supabase
         .from('user_binance_credentials')
         .upsert({
@@ -246,12 +243,10 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
         description: "Credenciais validadas e salvas! Buscando saldo...",
       });
 
-      // Notificar o componente pai sobre a atualização
       if (onCredentialsUpdated) {
         onCredentialsUpdated();
       }
 
-      // Buscar saldo automaticamente
       await fetchBalanceAfterSave();
 
     } catch (error) {
@@ -300,7 +295,6 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
     if (!user) return;
 
     try {
-      // Reset tutorial status to show it again
       await supabase
         .from('profiles')
         .update({ has_seen_tutorial: false })
@@ -311,7 +305,6 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
         description: "Recarregue a página para ver o tutorial novamente",
       });
 
-      // Reload the page to show tutorial
       setTimeout(() => {
         window.location.reload();
       }, 1500);
@@ -373,7 +366,6 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
             </Alert>
           )}
 
-          {/* Status de processamento */}
           {isProcessing && (
             <Alert className="border-blue-500/50 bg-blue-500/10">
               <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
