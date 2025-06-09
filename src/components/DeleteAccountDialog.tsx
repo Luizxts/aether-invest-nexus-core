@@ -49,17 +49,30 @@ const DeleteAccountDialog: React.FC<DeleteAccountDialogProps> = ({
     setIsDeleting(true);
 
     try {
-      // Delete all user data from our tables
-      await Promise.all([
+      console.log('Iniciando exclusão da conta para o usuário:', user.id);
+      
+      // Delete all user data from our tables in the correct order
+      const deleteOperations = [
         supabase.from('ai_evolution').delete().eq('user_id', user.id),
         supabase.from('trading_operations').delete().eq('user_id', user.id),
         supabase.from('user_binance_credentials').delete().eq('user_id', user.id),
         supabase.from('risk_settings').delete().eq('user_id', user.id),
         supabase.from('portfolio_data').delete().eq('user_id', user.id),
         supabase.from('profiles').delete().eq('id', user.id)
-      ]);
+      ];
 
-      // Sign out and show success message
+      const results = await Promise.allSettled(deleteOperations);
+      
+      // Log any failures
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`Failed to delete from table ${index}:`, result.reason);
+        }
+      });
+
+      console.log('Dados do usuário excluídos, fazendo logout...');
+
+      // Sign out after deleting data
       await signOut();
       
       toast({
@@ -80,8 +93,13 @@ const DeleteAccountDialog: React.FC<DeleteAccountDialogProps> = ({
     }
   };
 
+  const handleClose = () => {
+    setConfirmText('');
+    onClose();
+  };
+
   return (
-    <AlertDialog open={isOpen} onOpenChange={onClose}>
+    <AlertDialog open={isOpen} onOpenChange={handleClose}>
       <AlertDialogContent className="cyber-card max-w-md">
         <AlertDialogHeader>
           <AlertDialogTitle className="text-red-400 flex items-center gap-2">
@@ -95,6 +113,7 @@ const DeleteAccountDialog: React.FC<DeleteAccountDialogProps> = ({
                 <li>• Sua conta será excluída permanentemente</li>
                 <li>• Todos os dados de trading serão perdidos</li>
                 <li>• <strong>A IA voltará ao nível 1</strong> se você criar uma nova conta</li>
+                <li>• Seu nome de usuário ficará disponível para uso</li>
                 <li>• Seu progresso atual será perdido:</li>
               </ul>
             </div>
@@ -122,14 +141,16 @@ const DeleteAccountDialog: React.FC<DeleteAccountDialogProps> = ({
                 onChange={(e) => setConfirmText(e.target.value)}
                 placeholder="Digite EXCLUIR CONTA"
                 className="bg-gray-800/50 border-red-500/50 text-white"
+                disabled={isDeleting}
               />
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel 
-            onClick={onClose}
+            onClick={handleClose}
             className="border-gray-600 text-gray-300 hover:bg-gray-700"
+            disabled={isDeleting}
           >
             Cancelar
           </AlertDialogCancel>
