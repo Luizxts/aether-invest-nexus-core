@@ -33,9 +33,10 @@ interface RiskSettingsProps {
     stopLoss: boolean;
   };
   onSettingsChange: (settings: any) => void;
+  onCredentialsUpdated?: () => void;
 }
 
-const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange }) => {
+const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange, onCredentialsUpdated }) => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [showApiKey, setShowApiKey] = useState(false);
@@ -214,6 +215,11 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
         title: "Sucesso!",
         description: "Credenciais validadas e salvas! Buscando saldo...",
       });
+
+      // Notificar o componente pai sobre a atualização
+      if (onCredentialsUpdated) {
+        onCredentialsUpdated();
+      }
 
       // Buscar saldo automaticamente
       await fetchBalanceAfterSave();
