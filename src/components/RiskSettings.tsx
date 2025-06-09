@@ -62,7 +62,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
         .select('id')
         .eq('user_id', user.id)
         .eq('is_active', true)
-        .single();
+        .maybeSingle();
 
       setHasCredentials(!!data && !error);
     } catch (err) {
@@ -78,7 +78,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
         .from('ai_evolution')
         .select('*')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
       if (data && !error) {
         setAiEvolution(data);
@@ -101,26 +101,26 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
     setIsLoading(true);
 
     try {
-      // Primeiro, desativar credenciais existentes
-      await supabase
-        .from('user_binance_credentials')
-        .update({ is_active: false })
-        .eq('user_id', user.id);
+      console.log('Salvando credenciais para o usuário:', user.id);
 
-      // Inserir novas credenciais
+      // Use upsert to handle both insert and update cases
       const { error } = await supabase
         .from('user_binance_credentials')
-        .insert({
+        .upsert({
           user_id: user.id,
           api_key_encrypted: apiCredentials.apiKey,
           secret_key_encrypted: apiCredentials.secretKey,
           is_active: true
+        }, {
+          onConflict: 'user_id'
         });
 
       if (error) {
+        console.error('Erro no upsert:', error);
         throw error;
       }
 
+      console.log('Credenciais salvas com sucesso');
       setHasCredentials(true);
       setApiCredentials({ apiKey: '', secretKey: '' });
       
@@ -133,7 +133,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
       console.error('Erro ao salvar credenciais:', error);
       toast({
         title: "Erro",
-        description: "Erro ao salvar credenciais. Tente novamente.",
+        description: `Erro ao salvar credenciais: ${error.message || 'Tente novamente.'}`,
         variant: "destructive",
       });
     } finally {
@@ -145,10 +145,14 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
     if (!user) return;
 
     try {
-      await supabase
+      const { error } = await supabase
         .from('user_binance_credentials')
         .update({ is_active: false })
         .eq('user_id', user.id);
+
+      if (error) {
+        throw error;
+      }
 
       setHasCredentials(false);
       
@@ -159,6 +163,11 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange 
 
     } catch (error) {
       console.error('Erro ao remover credenciais:', error);
+      toast({
+        title: "Erro",
+        description: "Erro ao remover credenciais. Tente novamente.",
+        variant: "destructive",
+      });
     }
   };
 
