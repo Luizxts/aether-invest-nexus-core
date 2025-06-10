@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Eye, EyeOff, Key, Shield, AlertTriangle, CheckCircle, Loader2, WifiOff } from 'lucide-react';
+import { Eye, EyeOff, Key, Shield, AlertTriangle, CheckCircle, Loader2, WifiOff, Info } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -42,6 +42,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
   const [isConnected, setIsConnected] = useState(false);
   const [hasCredentials, setHasCredentials] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [helpInstructions, setHelpInstructions] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -73,10 +74,37 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
     }
   };
 
+  const validateCredentials = (apiKey: string, secretKey: string): { valid: boolean; error?: string } => {
+    if (!apiKey.trim() || !secretKey.trim()) {
+      return { valid: false, error: 'Ambas as credenciais são obrigatórias' };
+    }
+
+    if (apiKey.trim().length !== 64) {
+      return { valid: false, error: 'API Key deve ter exatamente 64 caracteres' };
+    }
+
+    if (secretKey.trim().length !== 64) {
+      return { valid: false, error: 'Secret Key deve ter exatamente 64 caracteres' };
+    }
+
+    // Check for valid characters (alphanumeric)
+    const validPattern = /^[a-zA-Z0-9]+$/;
+    if (!validPattern.test(apiKey.trim())) {
+      return { valid: false, error: 'API Key contém caracteres inválidos' };
+    }
+
+    if (!validPattern.test(secretKey.trim())) {
+      return { valid: false, error: 'Secret Key contém caracteres inválidos' };
+    }
+
+    return { valid: true };
+  };
+
   const validateBinanceCredentials = async (testApiKey: string, testSecretKey: string) => {
     try {
       console.log('Validating credentials...');
       setValidationError(null);
+      setHelpInstructions(null);
       
       const response = await supabase.functions.invoke('validate-binance-credentials', {
         body: { 
@@ -94,7 +122,10 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
 
       if (response.data?.error) {
         console.error('Validation failed:', response.data);
-        throw new Error(response.data.error);
+        const error = new Error(response.data.error);
+        (error as any).help = response.data.help;
+        (error as any).code = response.data.code;
+        throw error;
       }
 
       if (response.data?.valid) {
@@ -114,10 +145,22 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
   };
 
   const handleSaveCredentials = async () => {
-    if (!user || !apiKey.trim() || !secretKey.trim()) {
+    if (!user) {
       toast({
-        title: "Campos obrigatórios",
-        description: "Preencha ambas as credenciais da Binance",
+        title: "Erro de autenticação",
+        description: "Usuário não autenticado",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate credentials format first
+    const validation = validateCredentials(apiKey, secretKey);
+    if (!validation.valid) {
+      setValidationError(validation.error!);
+      toast({
+        title: "Formato inválido",
+        description: validation.error,
         variant: "destructive",
       });
       return;
@@ -125,9 +168,10 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
 
     setIsValidating(true);
     setValidationError(null);
+    setHelpInstructions(null);
 
     try {
-      // Validate credentials first
+      // Validate credentials with Binance
       console.log('Starting credential validation...');
       const validationResult = await validateBinanceCredentials(apiKey.trim(), secretKey.trim());
       
@@ -164,7 +208,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
       setSecretKey('');
       
       toast({
-        title: "Credenciais salvas!",
+        title: "✅ Credenciais salvas!",
         description: `Conectado com sucesso! Tipo de conta: ${validationResult.accountType}`,
       });
 
@@ -177,8 +221,12 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
       const errorMessage = error.message || 'Erro desconhecido ao validar credenciais';
       setValidationError(errorMessage);
       
+      if (error.help) {
+        setHelpInstructions(error.help);
+      }
+      
       toast({
-        title: "Erro de validação",
+        title: "❌ Erro de validação",
         description: errorMessage,
         variant: "destructive",
       });
@@ -201,6 +249,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
       setIsConnected(false);
       setHasCredentials(false);
       setValidationError(null);
+      setHelpInstructions(null);
       
       toast({
         title: "Credenciais removidas",
@@ -267,10 +316,18 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
         <CardContent className="space-y-4">
           {!hasCredentials ? (
             <>
-              <Alert className="border-yellow-500/50 bg-yellow-500/10">
-                <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                <AlertDescription className="text-yellow-200">
-                  <strong>Importante:</strong> Configure suas credenciais com permissão "Spot & Margin Trading" para começar a operar.
+              <Alert className="border-blue-500/50 bg-blue-500/10">
+                <Info className="h-4 w-4 text-blue-500" />
+                <AlertDescription className="text-blue-200">
+                  <strong>Como configurar sua API Binance:</strong>
+                  <ol className="mt-2 ml-4 list-decimal text-sm space-y-1">
+                    <li>Acesse sua conta Binance → "Gerenciamento de API"</li>
+                    <li>Crie uma nova API Key com nome "Seravat Bot"</li>
+                    <li>Habilite apenas: "Spot & Margin Trading" e "Leitura"</li>
+                    <li>REMOVA todas as restrições de IP (deixe em branco)</li>
+                    <li>Aguarde 2-3 minutos após criar/alterar</li>
+                    <li>Cole as chaves aqui (cada uma deve ter 64 caracteres)</li>
+                  </ol>
                 </AlertDescription>
               </Alert>
 
@@ -284,11 +341,19 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
                     id="api-key"
                     type="text"
                     value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
+                    onChange={(e) => {
+                      setApiKey(e.target.value);
+                      setValidationError(null);
+                      setHelpInstructions(null);
+                    }}
                     className="bg-gray-800/50 border-gray-600 text-white font-mono text-sm"
-                    placeholder="Cole sua API Key aqui..."
+                    placeholder="Cole sua API Key aqui (64 caracteres)..."
                     disabled={isValidating}
+                    maxLength={64}
                   />
+                  <div className="text-xs text-gray-400">
+                    Caracteres: {apiKey.length}/64
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -301,10 +366,15 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
                       id="secret-key"
                       type={showSecret ? "text" : "password"}
                       value={secretKey}
-                      onChange={(e) => setSecretKey(e.target.value)}
+                      onChange={(e) => {
+                        setSecretKey(e.target.value);
+                        setValidationError(null);
+                        setHelpInstructions(null);
+                      }}
                       className="bg-gray-800/50 border-gray-600 text-white font-mono text-sm pr-10"
-                      placeholder="Cole sua Secret Key aqui..."
+                      placeholder="Cole sua Secret Key aqui (64 caracteres)..."
                       disabled={isValidating}
+                      maxLength={64}
                     />
                     <button
                       type="button"
@@ -314,6 +384,9 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
                     >
                       {showSecret ? <EyeOff size={20} /> : <Eye size={20} />}
                     </button>
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    Caracteres: {secretKey.length}/64
                   </div>
                 </div>
 
@@ -326,10 +399,19 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
                   </Alert>
                 )}
 
+                {helpInstructions && (
+                  <Alert className="border-yellow-500/50 bg-yellow-500/10">
+                    <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                    <AlertDescription className="text-yellow-200">
+                      <pre className="whitespace-pre-wrap text-xs font-mono">{helpInstructions}</pre>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 <Button 
                   onClick={handleSaveCredentials}
                   className="w-full cyber-button"
-                  disabled={!apiKey.trim() || !secretKey.trim() || isValidating}
+                  disabled={!apiKey.trim() || !secretKey.trim() || isValidating || apiKey.length !== 64 || secretKey.length !== 64}
                 >
                   {isValidating ? (
                     <div className="flex items-center gap-2">

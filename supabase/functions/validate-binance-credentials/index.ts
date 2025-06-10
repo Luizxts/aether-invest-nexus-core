@@ -46,13 +46,45 @@ serve(async (req) => {
       )
     }
 
+    // Validate API key format
+    if (apiKey.length !== 64) {
+      console.error('Invalid API key format - wrong length')
+      return new Response(
+        JSON.stringify({ 
+          valid: false, 
+          error: 'Formato da API Key inválido',
+          details: 'A API Key deve ter exatamente 64 caracteres'
+        }),
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
+    // Validate secret key format
+    if (secretKey.length !== 64) {
+      console.error('Invalid secret key format - wrong length')
+      return new Response(
+        JSON.stringify({ 
+          valid: false, 
+          error: 'Formato da Secret Key inválido',
+          details: 'A Secret Key deve ter exatamente 64 caracteres'
+        }),
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
     console.log('Validating credentials for API Key:', apiKey.substring(0, 8) + '...')
 
     // Test basic connectivity first
     console.log('Testing basic connectivity...')
     try {
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
       
       const basicResponse = await fetch('https://api.binance.com/api/v3/time', {
         method: 'GET',
@@ -148,7 +180,7 @@ serve(async (req) => {
     
     try {
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 15000) // 15s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
       
       response = await fetch(accountUrl, {
         method: 'GET',
@@ -220,7 +252,31 @@ serve(async (req) => {
         switch (data.code) {
           case -2015:
             errorMessage = 'API Key inválida ou sem permissões necessárias'
-            helpMessage = 'Verifique se:\n• A API Key está correta\n• Tem permissão "Spot & Margin Trading" habilitada\n• Não há restrições de IP (ou o IP está na whitelist)\n• A Secret Key está correta'
+            helpMessage = `INSTRUÇÕES PARA CORRIGIR:
+
+1. VERIFIQUE SUA API KEY:
+   • Acesse sua conta Binance
+   • Vá em "Gerenciamento de API"
+   • Confirme que a API Key está ATIVA
+
+2. CONFIGURE AS PERMISSÕES:
+   • Habilite "Spot & Margin Trading"
+   • Habilite "Leitura" (Read)
+   • NÃO precisa de "Futures" ou "Withdraw"
+
+3. CONFIGURE RESTRIÇÕES DE IP:
+   • REMOVA todas as restrições de IP, OU
+   • Adicione seu IP atual à whitelist
+
+4. AGUARDE ALGUNS MINUTOS:
+   • Após alterar configurações, aguarde 2-3 minutos
+   • A Binance demora para propagar as mudanças
+
+5. TESTE NOVAMENTE:
+   • Cole novamente suas credenciais
+   • Certifique-se de copiar TODA a chave (64 caracteres)
+
+IMPORTANTE: Se você acabou de criar a API Key, aguarde alguns minutos antes de tentar novamente.`
             break
           case -1021:
             errorMessage = 'Erro de sincronização de tempo'
