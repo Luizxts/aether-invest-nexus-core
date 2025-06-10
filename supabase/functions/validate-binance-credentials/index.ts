@@ -3,18 +3,41 @@ import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { corsHeaders } from '../_shared/cors.ts'
 
 serve(async (req) => {
+  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
   }
 
   try {
-    const { apiKey, secretKey } = await req.json()
-
-    if (!apiKey || !secretKey) {
+    console.log('Starting Binance credentials validation...')
+    
+    let requestBody
+    try {
+      requestBody = await req.json()
+    } catch (parseError) {
+      console.error('Failed to parse request body:', parseError)
       return new Response(
         JSON.stringify({ 
           valid: false, 
-          error: 'API Key e Secret Key são obrigatórios' 
+          error: 'Dados da requisição inválidos',
+          details: 'Formato JSON inválido'
+        }),
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
+    const { apiKey, secretKey } = requestBody
+
+    if (!apiKey || !secretKey) {
+      console.error('Missing credentials')
+      return new Response(
+        JSON.stringify({ 
+          valid: false, 
+          error: 'API Key e Secret Key são obrigatórios',
+          details: 'Ambas as credenciais devem ser fornecidas'
         }),
         { 
           status: 400,
@@ -25,22 +48,30 @@ serve(async (req) => {
 
     console.log('Validating credentials for API Key:', apiKey.substring(0, 8) + '...')
 
-    // Primeiro testar conectividade básica com a API da Binance
+    // Test basic connectivity first
+    console.log('Testing basic connectivity...')
     try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10s timeout
+      
       const basicResponse = await fetch('https://api.binance.com/api/v3/time', {
         method: 'GET',
+        signal: controller.signal,
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'User-Agent': 'Seravat-Trading-Bot/1.0'
         }
       })
       
+      clearTimeout(timeoutId)
+      
       if (!basicResponse.ok) {
-        console.error('Basic API connectivity failed:', basicResponse.status)
+        console.error('Basic connectivity failed:', basicResponse.status, basicResponse.statusText)
         return new Response(
           JSON.stringify({ 
             valid: false, 
-            error: 'Erro de conectividade com a API da Binance',
-            details: 'Não foi possível conectar com os servidores da Binance'
+            error: 'Erro de conectividade com a Binance',
+            details: `Falha na conexão básica: ${basicResponse.status} ${basicResponse.statusText}`
           }),
           { 
             status: 500,
@@ -56,7 +87,7 @@ serve(async (req) => {
         JSON.stringify({ 
           valid: false, 
           error: 'Erro de conectividade',
-          details: 'Não foi possível conectar com a internet ou servidores da Binance'
+          details: 'Não foi possível conectar com os servidores da Binance. Verifique sua conexão.'
         }),
         { 
           status: 500,
@@ -65,11 +96,11 @@ serve(async (req) => {
       )
     }
 
-    // Agora testar com credenciais
+    // Create signature for authenticated request
+    console.log('Creating signature...')
     const timestamp = Date.now()
     const queryString = `timestamp=${timestamp}`
     
-    // Criar assinatura HMAC
     let signatureHex = ''
     try {
       const encoder = new TextEncoder()
@@ -90,6 +121,8 @@ serve(async (req) => {
       signatureHex = Array.from(new Uint8Array(signature))
         .map(b => b.toString(16).padStart(2, '0'))
         .join('')
+        
+      console.log('Signature created successfully')
     } catch (sigError) {
       console.error('Error creating signature:', sigError)
       return new Response(
@@ -105,7 +138,7 @@ serve(async (req) => {
       )
     }
 
-    // Testar endpoint autenticado
+    // Test authenticated endpoint
     const accountUrl = `https://api.binance.com/api/v3/account?${queryString}&signature=${signatureHex}`
     
     console.log('Testing authenticated endpoint...')
@@ -114,22 +147,42 @@ serve(async (req) => {
     let data
     
     try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000) // 15s timeout
+      
       response = await fetch(accountUrl, {
         method: 'GET',
+        signal: controller.signal,
         headers: {
           'X-MBX-APIKEY': apiKey,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'User-Agent': 'Seravat-Trading-Bot/1.0'
         }
       })
 
-      if (!response.ok) {
-        console.log('Binance API Response Status:', response.status)
-      }
+      clearTimeout(timeoutId)
+      
+      console.log('Binance API Response Status:', response.status)
 
       data = await response.json()
-      console.log('Binance API Response Data:', JSON.stringify(data, null, 2))
+      console.log('Binance API Response received')
     } catch (fetchError) {
       console.error('Error making request to Binance:', fetchError)
+      
+      if (fetchError.name === 'AbortError') {
+        return new Response(
+          JSON.stringify({ 
+            valid: false, 
+            error: 'Timeout na conexão com a Binance',
+            details: 'A requisição demorou muito para responder. Tente novamente.'
+          }),
+          { 
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        )
+      }
+      
       return new Response(
         JSON.stringify({ 
           valid: false, 
@@ -143,7 +196,8 @@ serve(async (req) => {
       )
     }
 
-    if (response.ok && data.accountType) {
+    // Process response
+    if (response.ok && data && data.accountType) {
       console.log('Credentials validated successfully')
       return new Response(
         JSON.stringify({ 
@@ -162,20 +216,29 @@ serve(async (req) => {
       let errorMessage = 'Credenciais inválidas'
       let helpMessage = ''
       
-      if (data.code === -2015) {
-        errorMessage = 'API Key inválida ou sem permissões necessárias'
-        helpMessage = 'Verifique se:\n• A API Key está correta\n• Tem permissão "Spot & Margin Trading" habilitada\n• Não há restrições de IP (ou o IP está na whitelist)\n• A Secret Key está correta'
-      } else if (data.code === -1021) {
-        errorMessage = 'Erro de sincronização de tempo'
-        helpMessage = 'Tente novamente em alguns segundos'
-      } else if (data.code === -1022) {
-        errorMessage = 'Assinatura inválida'
-        helpMessage = 'Verifique se a Secret Key está correta'
-      } else if (data.code === -2014) {
-        errorMessage = 'API Key inválida ou desabilitada'
-        helpMessage = 'Verifique se a API Key está ativa e bem formada'
-      } else if (data.msg) {
-        errorMessage = data.msg
+      if (data && data.code) {
+        switch (data.code) {
+          case -2015:
+            errorMessage = 'API Key inválida ou sem permissões necessárias'
+            helpMessage = 'Verifique se:\n• A API Key está correta\n• Tem permissão "Spot & Margin Trading" habilitada\n• Não há restrições de IP (ou o IP está na whitelist)\n• A Secret Key está correta'
+            break
+          case -1021:
+            errorMessage = 'Erro de sincronização de tempo'
+            helpMessage = 'Tente novamente em alguns segundos'
+            break
+          case -1022:
+            errorMessage = 'Assinatura inválida'
+            helpMessage = 'Verifique se a Secret Key está correta'
+            break
+          case -2014:
+            errorMessage = 'API Key inválida ou desabilitada'
+            helpMessage = 'Verifique se a API Key está ativa e bem formada'
+            break
+          default:
+            if (data.msg) {
+              errorMessage = data.msg
+            }
+        }
       }
       
       return new Response(
@@ -183,7 +246,7 @@ serve(async (req) => {
           valid: false, 
           error: errorMessage,
           help: helpMessage,
-          code: data.code 
+          code: data?.code || 'UNKNOWN'
         }),
         { 
           status: 400,
@@ -193,12 +256,13 @@ serve(async (req) => {
     }
 
   } catch (error) {
-    console.error('Error validating Binance credentials:', error)
+    console.error('Unexpected error validating Binance credentials:', error)
     return new Response(
       JSON.stringify({ 
         valid: false, 
         error: 'Erro interno do servidor',
-        details: 'Erro inesperado durante a validação. Tente novamente.' 
+        details: 'Erro inesperado durante a validação. Tente novamente.',
+        technical: error.message
       }),
       { 
         status: 500,

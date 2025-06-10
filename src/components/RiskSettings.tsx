@@ -1,314 +1,193 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Settings, 
-  Shield, 
-  AlertTriangle, 
-  Key, 
-  Eye, 
-  EyeOff, 
-  CheckCircle, 
-  XCircle, 
-  Play, 
-  Trash2,
-  BookOpen,
-  Loader2,
-  Info,
-  WifiOff
-} from 'lucide-react';
+import { Eye, EyeOff, Key, Shield, AlertTriangle, CheckCircle, Loader2, WifiOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import DeleteAccountDialog from './DeleteAccountDialog';
 
 interface RiskSettingsProps {
   settings: {
-    maxDailyLoss: number;
-    maxRiskPerTrade: number;
-    stopLoss: boolean;
+    max_daily_loss: number;
+    max_risk_per_trade: number;
+    stop_loss_enabled: boolean;
+    ai_level: number;
+    trading_mode: string;
+    is_trading_active: boolean;
   };
-  onSettingsChange: (settings: any) => void;
+  onSettingsChange: (newSettings: any) => void;
   onCredentialsUpdated?: () => void;
 }
 
-const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange, onCredentialsUpdated }) => {
+const RiskSettings: React.FC<RiskSettingsProps> = ({ 
+  settings, 
+  onSettingsChange,
+  onCredentialsUpdated 
+}) => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [showSecretKey, setShowSecretKey] = useState(false);
-  const [apiCredentials, setApiCredentials] = useState({
-    apiKey: '',
-    secretKey: ''
-  });
+  
+  // Credentials state
+  const [apiKey, setApiKey] = useState('');
+  const [secretKey, setSecretKey] = useState('');
+  const [showSecret, setShowSecret] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
   const [hasCredentials, setHasCredentials] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isValidatingAPI, setIsValidatingAPI] = useState(false);
-  const [isFetchingBalance, setIsFetchingBalance] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [aiEvolution, setAiEvolution] = useState<any>(null);
-  const [validationResult, setValidationResult] = useState<any>(null);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
-    checkExistingCredentials();
-    fetchAiEvolution();
+    if (user) {
+      checkExistingCredentials();
+    }
   }, [user]);
 
   const checkExistingCredentials = async () => {
     if (!user) return;
-    
+
     try {
-      const { data, error } = await supabase
+      const { data: credentials, error } = await supabase
         .from('user_binance_credentials')
-        .select('id')
+        .select('id, is_active')
         .eq('user_id', user.id)
-        .eq('is_active', true)
-        .maybeSingle();
+        .eq('is_active', true);
 
-      setHasCredentials(!!data && !error);
-    } catch (err) {
-      console.error('Error checking credentials:', err);
-      setHasCredentials(false);
-    }
-  };
-
-  const fetchAiEvolution = async () => {
-    if (!user) return;
-    
-    try {
-      const { data, error } = await supabase
-        .from('ai_evolution')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (data && !error) {
-        setAiEvolution(data);
+      if (!error && credentials && credentials.length > 0) {
+        setHasCredentials(true);
+        setIsConnected(true);
+      } else {
+        setHasCredentials(false);
+        setIsConnected(false);
       }
-    } catch (err) {
-      console.error('Error fetching AI evolution:', err);
+    } catch (error) {
+      console.error('Error checking credentials:', error);
+      setHasCredentials(false);
+      setIsConnected(false);
     }
   };
 
-  const validateBinanceCredentials = async (apiKey: string, secretKey: string) => {
+  const validateBinanceCredentials = async (testApiKey: string, testSecretKey: string) => {
     try {
-      setIsValidatingAPI(true);
-      setValidationResult(null);
-      setConnectionError(null);
-      
-      console.log('Validating credentials with API Key:', apiKey.substring(0, 8) + '...');
+      console.log('Validating credentials...');
+      setValidationError(null);
       
       const response = await supabase.functions.invoke('validate-binance-credentials', {
-        body: { apiKey, secretKey }
+        body: { 
+          apiKey: testApiKey.trim(), 
+          secretKey: testSecretKey.trim() 
+        }
       });
 
       console.log('Validation response:', response);
 
-      // Verificar se houve erro na função edge
       if (response.error) {
         console.error('Edge function error:', response.error);
-        setConnectionError('Erro interno do servidor. Tente novamente.');
-        
-        toast({
-          title: "Erro de sistema",
-          description: "Erro interno do servidor. Tente novamente em alguns instantes.",
-          variant: "destructive",
-        });
-        return false;
-      }
-
-      // Verificar resposta da validação
-      if (response.data?.valid) {
-        console.log('Credentials are valid!');
-        setValidationResult({
-          valid: true,
-          accountType: response.data.accountType,
-          permissions: response.data.permissions
-        });
-        setConnectionError(null);
-        return true;
-      } else {
-        console.error('Credentials are invalid:', response.data);
-        const errorData = response.data || {};
-        
-        setValidationResult({
-          valid: false,
-          error: errorData.error || 'Credenciais inválidas',
-          help: errorData.help,
-          code: errorData.code
-        });
-        
-        setConnectionError(errorData.error || 'Credenciais inválidas');
-        
-        toast({
-          title: "Credenciais inválidas",
-          description: errorData.error || "Verifique sua API Key e Secret Key",
-          variant: "destructive",
-        });
-        return false;
-      }
-    } catch (error) {
-      console.error('Error validating credentials:', error);
-      const errorMessage = 'Erro de conexão. Verifique sua internet e tente novamente.';
-      
-      setValidationResult({
-        valid: false,
-        error: errorMessage,
-        help: 'Verifique sua conexão com a internet e tente novamente.'
-      });
-      
-      setConnectionError(errorMessage);
-      
-      toast({
-        title: "Erro de conexão",
-        description: errorMessage,
-        variant: "destructive",
-      });
-      return false;
-    } finally {
-      setIsValidatingAPI(false);
-    }
-  };
-
-  const fetchBalanceAfterSave = async () => {
-    if (!user) return;
-
-    try {
-      setIsFetchingBalance(true);
-      
-      console.log('Fetching balance after save...');
-      
-      const response = await supabase.functions.invoke('get-binance-balance', {
-        body: { userId: user.id }
-      });
-
-      console.log('Balance fetch response:', response);
-
-      if (response.error) {
-        console.error('Error fetching balance:', response.error);
-        toast({
-          title: "Aviso",
-          description: "Credenciais salvas, mas não foi possível buscar o saldo. Tente atualizar manualmente no dashboard.",
-          variant: "default",
-        });
-        return;
+        throw new Error('Erro interno do servidor. Tente novamente.');
       }
 
       if (response.data?.error) {
-        console.error('Binance API Error:', response.data);
-        toast({
-          title: "Erro da Binance",
-          description: response.data.details || response.data.error,
-          variant: "destructive",
-        });
-        return;
+        console.error('Validation failed:', response.data);
+        throw new Error(response.data.error);
       }
 
-      if (response.data?.balance !== undefined) {
-        await supabase
-          .from('portfolio_data')
-          .upsert({
-            user_id: user.id,
-            total_balance: response.data.balance,
-            daily_pnl: 0,
-            last_updated: new Date().toISOString()
-          });
-
-        toast({
-          title: "Saldo atualizado!",
-          description: response.data.message || `Saldo: $${response.data.balance.toFixed(2)} USDT`,
-        });
+      if (response.data?.valid) {
+        console.log('Validation successful');
+        return {
+          valid: true,
+          accountType: response.data.accountType,
+          permissions: response.data.permissions || []
+        };
+      } else {
+        throw new Error('Resposta de validação inválida');
       }
-    } catch (error) {
-      console.error('Error fetching balance after save:', error);
-      toast({
-        title: "Erro",
-        description: "Erro ao buscar saldo. Tente atualizar manualmente.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsFetchingBalance(false);
+    } catch (error: any) {
+      console.error('Validation error:', error);
+      throw error;
     }
   };
 
   const handleSaveCredentials = async () => {
-    if (!user || !apiCredentials.apiKey || !apiCredentials.secretKey) {
+    if (!user || !apiKey.trim() || !secretKey.trim()) {
       toast({
-        title: "Erro",
-        description: "Por favor, preencha API Key e Secret Key",
+        title: "Campos obrigatórios",
+        description: "Preencha ambas as credenciais da Binance",
         variant: "destructive",
       });
       return;
     }
 
-    setIsLoading(true);
-    setConnectionError(null);
+    setIsValidating(true);
+    setValidationError(null);
 
     try {
-      console.log('Validating credentials...');
-      const isValid = await validateBinanceCredentials(apiCredentials.apiKey, apiCredentials.secretKey);
+      // Validate credentials first
+      console.log('Starting credential validation...');
+      const validationResult = await validateBinanceCredentials(apiKey.trim(), secretKey.trim());
       
-      if (!isValid) {
-        setIsLoading(false);
-        return;
+      if (!validationResult.valid) {
+        throw new Error('Credenciais inválidas');
       }
 
-      console.log('Credentials valid! Saving...');
+      console.log('Credentials valid, saving to database...');
 
-      const { error } = await supabase
+      // Deactivate existing credentials
+      await supabase
         .from('user_binance_credentials')
-        .upsert({
+        .update({ is_active: false })
+        .eq('user_id', user.id);
+
+      // Save new credentials
+      const { error: saveError } = await supabase
+        .from('user_binance_credentials')
+        .insert({
           user_id: user.id,
-          api_key_encrypted: apiCredentials.apiKey,
-          secret_key_encrypted: apiCredentials.secretKey,
+          api_key_encrypted: apiKey.trim(),
+          secret_key_encrypted: secretKey.trim(),
           is_active: true
-        }, {
-          onConflict: 'user_id'
         });
 
-      if (error) {
-        console.error('Erro no upsert:', error);
-        throw error;
+      if (saveError) {
+        console.error('Error saving credentials:', saveError);
+        throw new Error('Erro ao salvar credenciais no banco de dados');
       }
 
-      console.log('Credentials saved successfully');
+      setIsConnected(true);
       setHasCredentials(true);
-      setApiCredentials({ apiKey: '', secretKey: '' });
-      setConnectionError(null);
+      setApiKey('');
+      setSecretKey('');
       
       toast({
-        title: "Sucesso!",
-        description: "Credenciais validadas e salvas! Buscando saldo...",
+        title: "Credenciais salvas!",
+        description: `Conectado com sucesso! Tipo de conta: ${validationResult.accountType}`,
       });
 
       if (onCredentialsUpdated) {
         onCredentialsUpdated();
       }
 
-      await fetchBalanceAfterSave();
-
     } catch (error: any) {
-      console.error('Erro ao salvar credenciais:', error);
-      setConnectionError('Erro ao salvar credenciais no banco de dados');
+      console.error('Error in handleSaveCredentials:', error);
+      const errorMessage = error.message || 'Erro desconhecido ao validar credenciais';
+      setValidationError(errorMessage);
+      
       toast({
-        title: "Erro",
-        description: `Erro ao salvar credenciais: ${error.message || 'Tente novamente.'}`,
+        title: "Erro de validação",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
-      setIsLoading(false);
+      setIsValidating(false);
     }
   };
 
-  const handleRemoveCredentials = async () => {
+  const handleDeleteCredentials = async () => {
     if (!user) return;
 
     try {
@@ -317,401 +196,245 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
         .update({ is_active: false })
         .eq('user_id', user.id);
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
+      setIsConnected(false);
       setHasCredentials(false);
-      setValidationResult(null);
-      setConnectionError(null);
+      setValidationError(null);
       
       toast({
         title: "Credenciais removidas",
-        description: "Credenciais da Binance foram removidas",
+        description: "Suas credenciais da Binance foram desconectadas",
       });
 
+      if (onCredentialsUpdated) {
+        onCredentialsUpdated();
+      }
     } catch (error) {
-      console.error('Erro ao remover credenciais:', error);
+      console.error('Error deleting credentials:', error);
       toast({
         title: "Erro",
-        description: "Erro ao remover credenciais. Tente novamente.",
+        description: "Erro ao remover credenciais",
         variant: "destructive",
       });
     }
   };
 
-  const handleShowTutorial = async () => {
+  const updateSetting = async (key: string, value: any) => {
     if (!user) return;
 
     try {
-      await supabase
-        .from('profiles')
-        .update({ has_seen_tutorial: false })
-        .eq('id', user.id);
+      const newSettings = { ...settings, [key]: value };
+      
+      const { error } = await supabase
+        .from('risk_settings')
+        .update({ [key]: value })
+        .eq('user_id', user.id);
 
-      toast({
-        title: "Tutorial ativado!",
-        description: "Recarregue a página para ver o tutorial novamente",
-      });
-
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
-
+      if (!error) {
+        onSettingsChange(newSettings);
+        toast({
+          title: "Configuração atualizada!",
+          description: "Suas configurações foram salvas com sucesso",
+        });
+      }
     } catch (error) {
-      console.error('Error resetting tutorial:', error);
+      console.error('Error updating setting:', error);
       toast({
         title: "Erro",
-        description: "Erro ao ativar tutorial. Tente novamente.",
+        description: "Erro ao atualizar configuração",
         variant: "destructive",
       });
     }
   };
 
-  const updateSettings = (key: string, value: any) => {
-    onSettingsChange({
-      ...settings,
-      [key]: value
-    });
-  };
-
-  const isProcessing = isLoading || isValidatingAPI || isFetchingBalance;
-
   return (
     <div className="space-y-6">
-      {/* Configuração da API Binance */}
+      {/* Binance Credentials */}
       <Card className="cyber-card">
         <CardHeader>
           <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
-            <Key className="w-6 h-6 text-neon-blue" />
-            Credenciais da Binance
-            {hasCredentials ? (
-              <Badge variant="outline" className="border-neon-green text-neon-green ml-auto">
+            <Key className="w-5 h-5 text-neon-blue" />
+            Credenciais Binance
+            {isConnected && (
+              <Badge variant="outline" className="border-neon-green text-neon-green ml-2">
                 <CheckCircle className="w-4 h-4 mr-1" />
-                Configurado
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="border-red-500 text-red-500 ml-auto">
-                <XCircle className="w-4 h-4 mr-1" />
-                Não configurado
+                Conectado
               </Badge>
             )}
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-4">
           {!hasCredentials ? (
-            <Alert className="border-yellow-500/50 bg-yellow-500/10">
-              <AlertTriangle className="h-4 w-4 text-yellow-500" />
-              <AlertDescription className="text-yellow-200">
-                <strong>Importante:</strong> Configure suas credenciais da Binance com permissão "Spot & Margin Trading" para o robô funcionar.
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <Alert className="border-green-500/50 bg-green-500/10">
-              <CheckCircle className="h-4 w-4 text-green-500" />
-              <AlertDescription className="text-green-200">
-                Credenciais configuradas! O robô está pronto para operar.
-                {validationResult?.accountType && (
-                  <div className="mt-2 text-xs">
-                    Tipo de conta: {validationResult.accountType}
-                  </div>
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
+            <>
+              <Alert className="border-yellow-500/50 bg-yellow-500/10">
+                <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                <AlertDescription className="text-yellow-200">
+                  <strong>Importante:</strong> Configure suas credenciais com permissão "Spot & Margin Trading" para começar a operar.
+                </AlertDescription>
+              </Alert>
 
-          {isProcessing && (
-            <Alert className="border-blue-500/50 bg-blue-500/10">
-              <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
-              <AlertDescription className="text-blue-200">
-                {isValidatingAPI && "🔍 Validando credenciais com a Binance..."}
-                {isLoading && !isValidatingAPI && !isFetchingBalance && "💾 Salvando credenciais..."}
-                {isFetchingBalance && "💰 Buscando saldo atual..."}
-              </AlertDescription>
-            </Alert>
-          )}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="api-key" className="text-gray-300 flex items-center gap-2">
+                    <Key size={16} />
+                    API Key da Binance
+                  </Label>
+                  <Input
+                    id="api-key"
+                    type="text"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    className="bg-gray-800/50 border-gray-600 text-white font-mono text-sm"
+                    placeholder="Cole sua API Key aqui..."
+                    disabled={isValidating}
+                  />
+                </div>
 
-          {connectionError && (
-            <Alert className="border-red-500/50 bg-red-500/10">
-              <WifiOff className="h-4 w-4 text-red-500" />
-              <AlertDescription className="text-red-200">
-                <strong>Erro de conexão:</strong> {connectionError}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {validationResult && !validationResult.valid && !connectionError && (
-            <Alert className="border-red-500/50 bg-red-500/10">
-              <AlertTriangle className="h-4 w-4 text-red-500" />
-              <AlertDescription className="text-red-200">
-                <strong>Erro:</strong> {validationResult.error}
-                {validationResult.help && (
-                  <div className="mt-2 text-xs whitespace-pre-line">
-                    {validationResult.help}
-                  </div>
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <div className="space-y-4">
-            <div className="space-y-3">
-              <Label className="text-gray-300">API Key da Binance</Label>
-              <div className="relative">
-                <Input
-                  type={showApiKey ? "text" : "password"}
-                  value={apiCredentials.apiKey}
-                  onChange={(e) => setApiCredentials({...apiCredentials, apiKey: e.target.value})}
-                  placeholder="Sua API Key da Binance"
-                  className="bg-gray-800/50 border-gray-600 text-white pr-10"
-                  disabled={isProcessing}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-                >
-                  {showApiKey ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <Label className="text-gray-300">Secret Key da Binance</Label>
-              <div className="relative">
-                <Input
-                  type={showSecretKey ? "text" : "password"}
-                  value={apiCredentials.secretKey}
-                  onChange={(e) => setApiCredentials({...apiCredentials, secretKey: e.target.value})}
-                  placeholder="Sua Secret Key da Binance"
-                  className="bg-gray-800/50 border-gray-600 text-white pr-10"
-                  disabled={isProcessing}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowSecretKey(!showSecretKey)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-                >
-                  {showSecretKey ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                onClick={handleSaveCredentials}
-                disabled={isProcessing || !apiCredentials.apiKey || !apiCredentials.secretKey}
-                className="cyber-button flex-1"
-              >
-                {isProcessing ? (
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    {isValidatingAPI ? 'Validando...' : 
-                     isFetchingBalance ? 'Buscando saldo...' : 'Salvando...'}
-                  </div>
-                ) : (
-                  'Validar & Salvar'
-                )}
-              </Button>
-              
-              {hasCredentials && (
-                <Button
-                  onClick={handleRemoveCredentials}
-                  variant="outline"
-                  className="border-red-500 text-red-500 hover:bg-red-500/10"
-                  disabled={isProcessing}
-                >
-                  Remover
-                </Button>
-              )}
-            </div>
-
-            <div className="bg-gray-800/30 p-4 rounded-lg border border-gray-700/50">
-              <h4 className="text-sm font-semibold text-neon-green mb-2 flex items-center gap-2">
-                <Info className="w-4 h-4" />
-                Como obter suas credenciais:
-              </h4>
-              <ol className="text-xs text-gray-400 space-y-1">
-                <li>1. Acesse sua conta na Binance</li>
-                <li>2. Vá em Perfil → Segurança API</li>
-                <li>3. Crie uma nova API Key</li>
-                <li>4. <strong className="text-yellow-300">Habilite "Spot & Margin Trading"</strong></li>
-                <li>5. <strong className="text-yellow-300">Não configure restrições de IP</strong> (ou adicione o IP do servidor)</li>
-                <li>6. Cole aqui suas credenciais</li>
-              </ol>
-              <div className="mt-3 p-3 bg-red-500/20 border border-red-500/30 rounded text-xs">
-                <strong>⚠️ Problemas comuns:</strong>
-                <ul className="mt-1 space-y-1">
-                  <li>• API Key sem permissão "Spot & Margin Trading"</li>
-                  <li>• Restrições de IP configuradas</li>
-                  <li>• API Key desabilitada</li>
-                  <li>• Secret Key incorreta</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Configurações de Risco */}
-      <Card className="cyber-card">
-        <CardHeader>
-          <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
-            <Settings className="w-6 h-6 text-neon-blue" />
-            Configurações de Risco
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <Alert className="border-yellow-500/50 bg-yellow-500/10">
-            <AlertTriangle className="h-4 w-4 text-yellow-500" />
-            <AlertDescription className="text-yellow-200">
-              Estas configurações controlam o comportamento da IA e são fundamentais para proteger seu capital.
-            </AlertDescription>
-          </Alert>
-
-          <div className="space-y-4">
-            <div className="space-y-3">
-              <Label className="text-gray-300 flex items-center gap-2">
-                <Shield className="w-4 h-4" />
-                Perda Máxima Diária: {settings.maxDailyLoss}%
-              </Label>
-              <Slider
-                value={[settings.maxDailyLoss]}
-                onValueChange={(value) => updateSettings('maxDailyLoss', value[0])}
-                max={20}
-                min={1}
-                step={0.5}
-                className="w-full"
-              />
-              <p className="text-xs text-gray-400">
-                A IA parará todas as operações se atingir esta perda
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              <Label className="text-gray-300 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4" />
-                Risco Máximo por Trade: {settings.maxRiskPerTrade}%
-              </Label>
-              <Slider
-                value={[settings.maxRiskPerTrade]}
-                onValueChange={(value) => updateSettings('maxRiskPerTrade', value[0])}
-                max={10}
-                min={0.5}
-                step={0.1}
-                className="w-full"
-              />
-              <p className="text-xs text-gray-400">
-                Percentual máximo do capital em cada operação
-              </p>
-            </div>
-
-            <div className="flex items-center justify-between p-4 bg-gray-800/30 rounded-lg">
-              <div>
-                <Label className="text-gray-300">Stop Loss Automático</Label>
-                <p className="text-xs text-gray-400">
-                  Ativar stop loss inteligente em todas as posições
-                </p>
-              </div>
-              <Switch
-                checked={settings.stopLoss}
-                onCheckedChange={(checked) => updateSettings('stopLoss', checked)}
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="cyber-card">
-        <CardHeader>
-          <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
-            <BookOpen className="w-6 h-6 text-neon-blue" />
-            Tutorial e Conta
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-4">
-            <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-              <h4 className="font-semibold text-blue-300 mb-3">📚 Tutorial</h4>
-              <p className="text-sm text-blue-200 mb-3">
-                Perdeu alguma parte do tutorial ou quer revisar as funcionalidades?
-              </p>
-              <Button
-                onClick={handleShowTutorial}
-                variant="outline"
-                className="border-blue-500 text-blue-300 hover:bg-blue-500/10"
-              >
-                <Play className="w-4 h-4 mr-2" />
-                Mostrar Tutorial Novamente
-              </Button>
-            </div>
-
-            <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
-              <h4 className="font-semibold text-red-300 mb-3">⚠️ Zona de Perigo</h4>
-              <p className="text-sm text-red-200 mb-3">
-                Excluir sua conta removerá todos os dados e o progresso da IA será perdido.
-              </p>
-              {aiEvolution && (
-                <div className="mb-3 p-3 bg-gray-800/50 rounded border border-gray-600">
-                  <p className="text-xs text-gray-300">Seu progresso atual:</p>
-                  <div className="flex gap-4 mt-1">
-                    <span className="text-neon-purple font-bold">IA Nível {aiEvolution.ai_level}</span>
-                    <span className="text-neon-blue">{aiEvolution.total_trades} trades</span>
+                <div className="space-y-2">
+                  <Label htmlFor="secret-key" className="text-gray-300 flex items-center gap-2">
+                    <Shield size={16} />
+                    Secret Key da Binance
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="secret-key"
+                      type={showSecret ? "text" : "password"}
+                      value={secretKey}
+                      onChange={(e) => setSecretKey(e.target.value)}
+                      className="bg-gray-800/50 border-gray-600 text-white font-mono text-sm pr-10"
+                      placeholder="Cole sua Secret Key aqui..."
+                      disabled={isValidating}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSecret(!showSecret)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
+                      disabled={isValidating}
+                    >
+                      {showSecret ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
                   </div>
                 </div>
-              )}
-              <Button
-                onClick={() => setShowDeleteDialog(true)}
-                variant="outline"
-                className="border-red-500 text-red-300 hover:bg-red-500/10"
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Excluir Conta
-              </Button>
+
+                {validationError && (
+                  <Alert className="border-red-500/50 bg-red-500/10">
+                    <WifiOff className="h-4 w-4 text-red-500" />
+                    <AlertDescription className="text-red-200">
+                      <strong>Erro:</strong> {validationError}
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                <Button 
+                  onClick={handleSaveCredentials}
+                  className="w-full cyber-button"
+                  disabled={!apiKey.trim() || !secretKey.trim() || isValidating}
+                >
+                  {isValidating ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Validando credenciais...
+                    </div>
+                  ) : (
+                    'Conectar à Binance'
+                  )}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-green-600/10 border border-green-600/30 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5 text-neon-green" />
+                  <span className="text-white">Credenciais configuradas e validadas</span>
+                </div>
+                <Button 
+                  onClick={handleDeleteCredentials}
+                  variant="outline"
+                  size="sm"
+                  className="border-red-500 text-red-400 hover:bg-red-500/10"
+                >
+                  Desconectar
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 
+      {/* Risk Management Settings */}
       <Card className="cyber-card">
         <CardHeader>
-          <CardTitle className="text-lg font-bold text-white">
-            ⚙️ Configurações Avançadas
+          <CardTitle className="text-xl font-bold text-white">
+            ⚡ Gerenciamento de Risco
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 bg-gray-800/30 rounded-lg border border-gray-700/50">
-              <h4 className="font-semibold text-white mb-2">Alavancagem Máxima</h4>
-              <p className="text-2xl font-bold text-neon-blue">5x</p>
-              <p className="text-xs text-gray-400">Ajustada automaticamente pela IA</p>
-            </div>
-            
-            <div className="p-4 bg-gray-800/30 rounded-lg border border-gray-700/50">
-              <h4 className="font-semibold text-white mb-2">Timeout de Posição</h4>
-              <p className="text-2xl font-bold text-neon-green">2h</p>
-              <p className="text-xs text-gray-400">Tempo máximo em uma posição</p>
+        <CardContent className="space-y-6">
+          <div className="space-y-2">
+            <Label className="text-gray-300">Perda Máxima Diária (%)</Label>
+            <Slider
+              value={[settings.max_daily_loss]}
+              onValueChange={(value) => updateSetting('max_daily_loss', value[0])}
+              max={20}
+              min={1}
+              step={0.5}
+              className="py-4"
+            />
+            <div className="text-sm text-gray-400">
+              Atual: {settings.max_daily_loss}%
             </div>
           </div>
 
-          <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-            <h4 className="font-semibold text-blue-300 mb-2">🛡️ Proteções Ativas</h4>
-            <ul className="text-sm text-blue-200 space-y-1">
-              <li>• Anti-liquidação inteligente</li>
-              <li>• Detecção de manipulação de mercado</li>
-              <li>• Sistema de circuit breaker</li>
-              <li>• Backup automático de estratégias</li>
-            </ul>
+          <div className="space-y-2">
+            <Label className="text-gray-300">Risco Máximo por Trade (%)</Label>
+            <Slider
+              value={[settings.max_risk_per_trade]}
+              onValueChange={(value) => updateSetting('max_risk_per_trade', value[0])}
+              max={10}
+              min={0.5}
+              step={0.1}
+              className="py-4"
+            />
+            <div className="text-sm text-gray-400">
+              Atual: {settings.max_risk_per_trade}%
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="text-gray-300">Stop Loss Automático</Label>
+              <p className="text-sm text-gray-400">
+                Ativar stop loss em todas as operações
+              </p>
+            </div>
+            <Switch
+              checked={settings.stop_loss_enabled}
+              onCheckedChange={(checked) => updateSetting('stop_loss_enabled', checked)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-gray-300">Nível da IA</Label>
+            <Slider
+              value={[settings.ai_level]}
+              onValueChange={(value) => updateSetting('ai_level', value[0])}
+              max={5}
+              min={1}
+              step={1}
+              className="py-4"
+            />
+            <div className="text-sm text-gray-400">
+              Nível {settings.ai_level}: {
+                settings.ai_level === 1 ? 'Conservador' :
+                settings.ai_level === 2 ? 'Moderado' :
+                settings.ai_level === 3 ? 'Balanceado' :
+                settings.ai_level === 4 ? 'Agressivo' : 'Máximo'
+              }
+            </div>
           </div>
         </CardContent>
       </Card>
-
-      <DeleteAccountDialog
-        isOpen={showDeleteDialog}
-        onClose={() => setShowDeleteDialog(false)}
-        aiLevel={aiEvolution?.ai_level || 1}
-        totalTrades={aiEvolution?.total_trades || 0}
-      />
     </div>
   );
 };

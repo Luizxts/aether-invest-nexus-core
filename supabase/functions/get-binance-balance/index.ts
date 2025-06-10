@@ -12,11 +12,33 @@ serve(async (req) => {
   }
 
   try {
-    const { userId } = await req.json()
+    console.log('Starting balance fetch...')
+    
+    let requestBody
+    try {
+      requestBody = await req.json()
+    } catch (parseError) {
+      console.error('Failed to parse request body:', parseError)
+      return new Response(
+        JSON.stringify({ 
+          error: 'Dados da requisição inválidos',
+          details: 'Formato JSON inválido'
+        }),
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
+    const { userId } = requestBody
 
     if (!userId) {
       return new Response(
-        JSON.stringify({ error: 'User ID é obrigatório' }),
+        JSON.stringify({ 
+          error: 'User ID é obrigatório',
+          details: 'ID do usuário deve ser fornecido'
+        }),
         { 
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -53,9 +75,17 @@ serve(async (req) => {
     
     console.log('Testing Binance connection with API Key:', apiKey.substring(0, 8) + '...')
 
-    // Testar conectividade básica primeiro
+    // Test basic connectivity first
     try {
-      const basicTest = await fetch('https://api.binance.com/api/v3/time')
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+      
+      const basicTest = await fetch('https://api.binance.com/api/v3/time', {
+        signal: controller.signal
+      })
+      
+      clearTimeout(timeoutId)
+      
       if (!basicTest.ok) {
         console.error('Basic connectivity test failed:', basicTest.status)
         return new Response(
@@ -86,7 +116,7 @@ serve(async (req) => {
     const timestamp = Date.now()
     const queryString = `timestamp=${timestamp}`
     
-    // Criar assinatura HMAC
+    // Create HMAC signature
     let signatureHex = ''
     try {
       const encoder = new TextEncoder()
@@ -129,17 +159,37 @@ serve(async (req) => {
     let data
     
     try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+      
       response = await fetch(binanceUrl, {
+        signal: controller.signal,
         headers: {
           'X-MBX-APIKEY': apiKey,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'User-Agent': 'Seravat-Trading-Bot/1.0'
         }
       })
 
+      clearTimeout(timeoutId)
       data = await response.json()
       console.log('Binance API Response status:', response.status)
     } catch (fetchError) {
       console.error('Error making request to Binance:', fetchError)
+      
+      if (fetchError.name === 'AbortError') {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Timeout na requisição',
+            details: 'A Binance demorou muito para responder. Tente novamente.'
+          }),
+          { 
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        )
+      }
+      
       return new Response(
         JSON.stringify({ 
           error: 'Erro de comunicação com a Binance',
@@ -158,20 +208,29 @@ serve(async (req) => {
       let errorMessage = 'Erro na API da Binance'
       let details = 'Erro desconhecido'
       
-      if (data.code === -2015) {
-        errorMessage = 'Credenciais da Binance inválidas'
-        details = 'Verifique se suas credenciais estão corretas e se têm as permissões necessárias:\n• Permissão "Spot & Margin Trading" habilitada\n• API Key ativa\n• Sem restrições de IP ou IP na whitelist'
-      } else if (data.code === -1021) {
-        errorMessage = 'Erro de sincronização de tempo'
-        details = 'Problema de timestamp. Tente novamente em alguns segundos.'
-      } else if (data.code === -1022) {
-        errorMessage = 'Assinatura inválida'
-        details = 'Problema com a Secret Key. Verifique se está correta.'
-      } else if (data.code === -2014) {
-        errorMessage = 'API Key desabilitada'
-        details = 'Sua API Key está desabilitada. Verifique na sua conta Binance.'
-      } else if (data.msg) {
-        details = data.msg
+      if (data && data.code) {
+        switch (data.code) {
+          case -2015:
+            errorMessage = 'Credenciais da Binance inválidas'
+            details = 'Verifique se suas credenciais estão corretas e têm as permissões necessárias'
+            break
+          case -1021:
+            errorMessage = 'Erro de sincronização de tempo'
+            details = 'Problema de timestamp. Tente novamente em alguns segundos.'
+            break
+          case -1022:
+            errorMessage = 'Assinatura inválida'
+            details = 'Problema com a Secret Key. Verifique se está correta.'
+            break
+          case -2014:
+            errorMessage = 'API Key desabilitada'
+            details = 'Sua API Key está desabilitada. Verifique na sua conta Binance.'
+            break
+          default:
+            if (data.msg) {
+              details = data.msg
+            }
+        }
       }
       
       return new Response(
@@ -203,44 +262,38 @@ serve(async (req) => {
 
     console.log('Processing balances...')
     
-    // Buscar preços atuais
+    // Fetch current prices
     let prices = []
     try {
-      const pricesResponse = await fetch('https://api.binance.com/api/v3/ticker/price')
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+      
+      const pricesResponse = await fetch('https://api.binance.com/api/v3/ticker/price', {
+        signal: controller.signal
+      })
+      
+      clearTimeout(timeoutId)
       
       if (!pricesResponse.ok) {
         console.error('Failed to fetch prices:', pricesResponse.status)
-        return new Response(
-          JSON.stringify({ 
-            error: 'Erro ao buscar preços das criptomoedas',
-            details: 'Não foi possível obter os preços atuais'
-          }),
-          { 
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          }
-        )
+        // Continue without prices, just show asset amounts
+        prices = []
+      } else {
+        prices = await pricesResponse.json()
       }
-      
-      prices = await pricesResponse.json()
     } catch (priceError) {
       console.error('Error fetching prices:', priceError)
-      return new Response(
-        JSON.stringify({ 
-          error: 'Erro ao buscar preços',
-          details: 'Não foi possível obter os preços atuais das criptomoedas'
-        }),
-        { 
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      )
+      prices = [] // Continue without prices
     }
     
     const priceMap = new Map()
-    prices.forEach((price: any) => {
-      priceMap.set(price.symbol, parseFloat(price.price))
-    })
+    if (Array.isArray(prices)) {
+      prices.forEach((price: any) => {
+        if (price.symbol && price.price) {
+          priceMap.set(price.symbol, parseFloat(price.price))
+        }
+      })
+    }
     
     let totalBalance = 0
     const nonZeroBalances = []
@@ -251,7 +304,7 @@ serve(async (req) => {
       const locked = parseFloat(balance.locked) || 0
       const total = free + locked
       
-      if (total > 0.001) { // Apenas considerar saldos significativos
+      if (total > 0.001) { // Only consider significant balances
         nonZeroBalances.push({
           asset,
           free: free.toString(),
@@ -261,9 +314,9 @@ serve(async (req) => {
         
         if (asset === 'USDT') {
           totalBalance += total
-          console.log(`${asset}: ${total} USDT (direto)`)
-        } else {
-          // Converter para USDT
+          console.log(`${asset}: ${total} USDT (direct)`)
+        } else if (priceMap.size > 0) {
+          // Convert to USDT using prices
           const usdtSymbol = `${asset}USDT`
           const btcSymbol = `${asset}BTC`
           
@@ -299,7 +352,8 @@ serve(async (req) => {
           totalAssets: data.balances.length,
           nonZeroAssets: nonZeroBalances.length,
           calculatedTotal: totalBalance,
-          accountType: data.accountType
+          accountType: data.accountType,
+          pricesAvailable: priceMap.size > 0
         }
       }),
       { 
@@ -308,12 +362,12 @@ serve(async (req) => {
     )
 
   } catch (error) {
-    console.error('Error fetching Binance balance:', error)
+    console.error('Unexpected error fetching Binance balance:', error)
     return new Response(
       JSON.stringify({ 
         error: 'Erro interno do servidor',
         details: 'Erro inesperado. Tente novamente em alguns instantes.',
-        technicalDetails: error.message 
+        technical: error.message 
       }),
       { 
         status: 500,
