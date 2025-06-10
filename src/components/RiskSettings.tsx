@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Eye, EyeOff, Key, Shield, AlertTriangle, CheckCircle, Loader2, WifiOff, Info } from 'lucide-react';
+import { Eye, EyeOff, Key, Shield, AlertTriangle, CheckCircle, Loader2, WifiOff, Info, Copy, Check } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -43,6 +43,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
   const [hasCredentials, setHasCredentials] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [helpInstructions, setHelpInstructions] = useState<string | null>(null);
+  const [copied, setCopied] = useState<{ [key: string]: boolean }>({});
 
   useEffect(() => {
     if (user) {
@@ -74,27 +75,31 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
     }
   };
 
-  const validateCredentials = (apiKey: string, secretKey: string): { valid: boolean; error?: string } => {
-    if (!apiKey.trim() || !secretKey.trim()) {
+  const validateCredentialsFormat = (apiKey: string, secretKey: string): { valid: boolean; error?: string } => {
+    // Remove whitespace
+    const cleanApiKey = apiKey.trim();
+    const cleanSecretKey = secretKey.trim();
+
+    if (!cleanApiKey || !cleanSecretKey) {
       return { valid: false, error: 'Ambas as credenciais são obrigatórias' };
     }
 
-    if (apiKey.trim().length !== 64) {
-      return { valid: false, error: 'API Key deve ter exatamente 64 caracteres' };
+    if (cleanApiKey.length !== 64) {
+      return { valid: false, error: `API Key deve ter exatamente 64 caracteres (atual: ${cleanApiKey.length})` };
     }
 
-    if (secretKey.trim().length !== 64) {
-      return { valid: false, error: 'Secret Key deve ter exatamente 64 caracteres' };
+    if (cleanSecretKey.length !== 64) {
+      return { valid: false, error: `Secret Key deve ter exatamente 64 caracteres (atual: ${cleanSecretKey.length})` };
     }
 
     // Check for valid characters (alphanumeric)
     const validPattern = /^[a-zA-Z0-9]+$/;
-    if (!validPattern.test(apiKey.trim())) {
-      return { valid: false, error: 'API Key contém caracteres inválidos' };
+    if (!validPattern.test(cleanApiKey)) {
+      return { valid: false, error: 'API Key deve conter apenas letras e números (sem espaços ou símbolos)' };
     }
 
-    if (!validPattern.test(secretKey.trim())) {
-      return { valid: false, error: 'Secret Key contém caracteres inválidos' };
+    if (!validPattern.test(cleanSecretKey)) {
+      return { valid: false, error: 'Secret Key deve conter apenas letras e números (sem espaços ou símbolos)' };
     }
 
     return { valid: true };
@@ -102,44 +107,57 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
 
   const validateBinanceCredentials = async (testApiKey: string, testSecretKey: string) => {
     try {
-      console.log('Validating credentials...');
-      setValidationError(null);
-      setHelpInstructions(null);
+      console.log('🔄 Starting credential validation...');
+      
+      const cleanApiKey = testApiKey.trim();
+      const cleanSecretKey = testSecretKey.trim();
+      
+      console.log('📤 Sending validation request to edge function');
       
       const response = await supabase.functions.invoke('validate-binance-credentials', {
         body: { 
-          apiKey: testApiKey.trim(), 
-          secretKey: testSecretKey.trim() 
+          apiKey: cleanApiKey, 
+          secretKey: cleanSecretKey 
         }
       });
 
-      console.log('Validation response:', response);
+      console.log('📥 Validation response received:', {
+        hasError: !!response.error,
+        hasData: !!response.data,
+        dataKeys: response.data ? Object.keys(response.data) : []
+      });
 
       if (response.error) {
-        console.error('Edge function error:', response.error);
-        throw new Error('Erro interno do servidor. Tente novamente.');
+        console.error('❌ Edge function error:', response.error);
+        throw new Error(`Erro interno: ${response.error.message || 'Falha na comunicação com o servidor'}`);
       }
 
       if (response.data?.error) {
-        console.error('Validation failed:', response.data);
+        console.error('❌ Validation failed:', response.data);
         const error = new Error(response.data.error);
         (error as any).help = response.data.help;
         (error as any).code = response.data.code;
+        (error as any).binanceMessage = response.data.binanceMessage;
         throw error;
       }
 
       if (response.data?.valid) {
-        console.log('Validation successful');
+        console.log('✅ Validation successful:', {
+          accountType: response.data.accountType,
+          canTrade: response.data.canTrade,
+          permissions: response.data.permissions
+        });
         return {
           valid: true,
           accountType: response.data.accountType,
-          permissions: response.data.permissions || []
+          permissions: response.data.permissions || [],
+          canTrade: response.data.canTrade || false
         };
       } else {
-        throw new Error('Resposta de validação inválida');
+        throw new Error('Resposta de validação inválida do servidor');
       }
     } catch (error: any) {
-      console.error('Validation error:', error);
+      console.error('❌ Validation error:', error);
       throw error;
     }
   };
@@ -155,7 +173,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
     }
 
     // Validate credentials format first
-    const validation = validateCredentials(apiKey, secretKey);
+    const validation = validateCredentialsFormat(apiKey, secretKey);
     if (!validation.valid) {
       setValidationError(validation.error!);
       toast({
@@ -171,15 +189,16 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
     setHelpInstructions(null);
 
     try {
+      console.log('🚀 Starting credential validation process...');
+      
       // Validate credentials with Binance
-      console.log('Starting credential validation...');
-      const validationResult = await validateBinanceCredentials(apiKey.trim(), secretKey.trim());
+      const validationResult = await validateBinanceCredentials(apiKey, secretKey);
       
       if (!validationResult.valid) {
-        throw new Error('Credenciais inválidas');
+        throw new Error('Credenciais inválidas após validação');
       }
 
-      console.log('Credentials valid, saving to database...');
+      console.log('💾 Credentials valid, saving to database...');
 
       // Deactivate existing credentials
       await supabase
@@ -198,7 +217,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
         });
 
       if (saveError) {
-        console.error('Error saving credentials:', saveError);
+        console.error('❌ Error saving credentials:', saveError);
         throw new Error('Erro ao salvar credenciais no banco de dados');
       }
 
@@ -207,9 +226,11 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
       setApiKey('');
       setSecretKey('');
       
+      const tradeStatus = validationResult.canTrade ? 'com permissão de trading' : 'somente leitura';
+      
       toast({
         title: "✅ Credenciais salvas!",
-        description: `Conectado com sucesso! Tipo de conta: ${validationResult.accountType}`,
+        description: `Conectado com sucesso! Conta: ${validationResult.accountType} (${tradeStatus})`,
       });
 
       if (onCredentialsUpdated) {
@@ -217,7 +238,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
       }
 
     } catch (error: any) {
-      console.error('Error in handleSaveCredentials:', error);
+      console.error('❌ Error in handleSaveCredentials:', error);
       const errorMessage = error.message || 'Erro desconhecido ao validar credenciais';
       setValidationError(errorMessage);
       
@@ -269,6 +290,18 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
     }
   };
 
+  const copyToClipboard = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied({ ...copied, [key]: true });
+      setTimeout(() => {
+        setCopied({ ...copied, [key]: false });
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
   const updateSetting = async (key: string, value: any) => {
     if (!user) return;
 
@@ -297,6 +330,20 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
     }
   };
 
+  const getApiKeyValidationColor = () => {
+    if (!apiKey) return 'border-gray-600';
+    if (apiKey.length !== 64) return 'border-red-500';
+    if (!/^[a-zA-Z0-9]+$/.test(apiKey.trim())) return 'border-red-500';
+    return 'border-green-500';
+  };
+
+  const getSecretKeyValidationColor = () => {
+    if (!secretKey) return 'border-gray-600';
+    if (secretKey.length !== 64) return 'border-red-500';
+    if (!/^[a-zA-Z0-9]+$/.test(secretKey.trim())) return 'border-red-500';
+    return 'border-green-500';
+  };
+
   return (
     <div className="space-y-6">
       {/* Binance Credentials */}
@@ -319,14 +366,20 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
               <Alert className="border-blue-500/50 bg-blue-500/10">
                 <Info className="h-4 w-4 text-blue-500" />
                 <AlertDescription className="text-blue-200">
-                  <strong>Como configurar sua API Binance:</strong>
-                  <ol className="mt-2 ml-4 list-decimal text-sm space-y-1">
-                    <li>Acesse sua conta Binance → "Gerenciamento de API"</li>
-                    <li>Crie uma nova API Key com nome "Seravat Bot"</li>
-                    <li>Habilite apenas: "Spot & Margin Trading" e "Leitura"</li>
-                    <li>REMOVA todas as restrições de IP (deixe em branco)</li>
-                    <li>Aguarde 2-3 minutos após criar/alterar</li>
-                    <li>Cole as chaves aqui (cada uma deve ter 64 caracteres)</li>
+                  <strong>⚠️ IMPORTANTE - Siga EXATAMENTE estas etapas:</strong>
+                  <ol className="mt-3 ml-4 list-decimal text-sm space-y-2">
+                    <li><strong>Acesse:</strong> Binance → Login → "Gerenciamento de API"</li>
+                    <li><strong>Crie API Key:</strong> "Criar API" → Nome: "Seravat Bot"</li>
+                    <li><strong>Permissões obrigatórias:</strong>
+                      <div className="ml-4 mt-1">
+                        • ✅ "Spot & Margin Trading" (OBRIGATÓRIO)
+                        <br />• ✅ "Leitura" (Read) (OBRIGATÓRIO)
+                        <br />• ❌ Futures, Options, etc (desnecessário)
+                      </div>
+                    </li>
+                    <li><strong>Restrições de IP:</strong> REMOVER TODAS (deixar lista vazia)</li>
+                    <li><strong>Aguardar:</strong> 5-10 minutos após criar/alterar</li>
+                    <li><strong>Copiar:</strong> API Key e Secret Key (64 caracteres cada)</li>
                   </ol>
                 </AlertDescription>
               </Alert>
@@ -337,22 +390,41 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
                     <Key size={16} />
                     API Key da Binance
                   </Label>
-                  <Input
-                    id="api-key"
-                    type="text"
-                    value={apiKey}
-                    onChange={(e) => {
-                      setApiKey(e.target.value);
-                      setValidationError(null);
-                      setHelpInstructions(null);
-                    }}
-                    className="bg-gray-800/50 border-gray-600 text-white font-mono text-sm"
-                    placeholder="Cole sua API Key aqui (64 caracteres)..."
-                    disabled={isValidating}
-                    maxLength={64}
-                  />
-                  <div className="text-xs text-gray-400">
-                    Caracteres: {apiKey.length}/64
+                  <div className="relative">
+                    <Input
+                      id="api-key"
+                      type="text"
+                      value={apiKey}
+                      onChange={(e) => {
+                        setApiKey(e.target.value);
+                        setValidationError(null);
+                        setHelpInstructions(null);
+                      }}
+                      className={`bg-gray-800/50 ${getApiKeyValidationColor()} text-white font-mono text-sm pr-10`}
+                      placeholder="Cole sua API Key aqui (64 caracteres)..."
+                      disabled={isValidating}
+                      maxLength={64}
+                    />
+                    {apiKey && (
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(apiKey, 'apiKey')}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
+                        disabled={isValidating}
+                      >
+                        {copied.apiKey ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className={`${apiKey.length === 64 ? 'text-green-400' : 'text-gray-400'}`}>
+                      Caracteres: {apiKey.length}/64
+                    </span>
+                    {apiKey && (
+                      <span className={`${/^[a-zA-Z0-9]+$/.test(apiKey.trim()) ? 'text-green-400' : 'text-red-400'}`}>
+                        {/^[a-zA-Z0-9]+$/.test(apiKey.trim()) ? '✓ Formato válido' : '✗ Formato inválido'}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -371,22 +443,41 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
                         setValidationError(null);
                         setHelpInstructions(null);
                       }}
-                      className="bg-gray-800/50 border-gray-600 text-white font-mono text-sm pr-10"
+                      className={`bg-gray-800/50 ${getSecretKeyValidationColor()} text-white font-mono text-sm pr-20`}
                       placeholder="Cole sua Secret Key aqui (64 caracteres)..."
                       disabled={isValidating}
                       maxLength={64}
                     />
-                    <button
-                      type="button"
-                      onClick={() => setShowSecret(!showSecret)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
-                      disabled={isValidating}
-                    >
-                      {showSecret ? <EyeOff size={20} /> : <Eye size={20} />}
-                    </button>
+                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex gap-2">
+                      {secretKey && (
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(secretKey, 'secretKey')}
+                          className="text-gray-400 hover:text-white"
+                          disabled={isValidating}
+                        >
+                          {copied.secretKey ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowSecret(!showSecret)}
+                        className="text-gray-400 hover:text-white"
+                        disabled={isValidating}
+                      >
+                        {showSecret ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-400">
-                    Caracteres: {secretKey.length}/64
+                  <div className="flex justify-between text-xs">
+                    <span className={`${secretKey.length === 64 ? 'text-green-400' : 'text-gray-400'}`}>
+                      Caracteres: {secretKey.length}/64
+                    </span>
+                    {secretKey && (
+                      <span className={`${/^[a-zA-Z0-9]+$/.test(secretKey.trim()) ? 'text-green-400' : 'text-red-400'}`}>
+                        {/^[a-zA-Z0-9]+$/.test(secretKey.trim()) ? '✓ Formato válido' : '✗ Formato inválido'}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -411,7 +502,15 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({
                 <Button 
                   onClick={handleSaveCredentials}
                   className="w-full cyber-button"
-                  disabled={!apiKey.trim() || !secretKey.trim() || isValidating || apiKey.length !== 64 || secretKey.length !== 64}
+                  disabled={
+                    !apiKey.trim() || 
+                    !secretKey.trim() || 
+                    isValidating || 
+                    apiKey.length !== 64 || 
+                    secretKey.length !== 64 ||
+                    !/^[a-zA-Z0-9]+$/.test(apiKey.trim()) ||
+                    !/^[a-zA-Z0-9]+$/.test(secretKey.trim())
+                  }
                 >
                   {isValidating ? (
                     <div className="flex items-center gap-2">
