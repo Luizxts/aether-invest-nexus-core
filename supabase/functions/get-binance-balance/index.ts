@@ -28,7 +28,6 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-    // Get user's Binance credentials
     const { data: credentials, error: credError } = await supabase
       .from('user_binance_credentials')
       .select('api_key_encrypted, secret_key_encrypted')
@@ -54,7 +53,22 @@ serve(async (req) => {
     
     console.log('Testing Binance connection with API Key:', apiKey.substring(0, 8) + '...')
 
-    // Create signature for account endpoint
+    // Primeiro testar conectividade básica
+    const basicTest = await fetch('https://api.binance.com/api/v3/time')
+    if (!basicTest.ok) {
+      console.error('Basic connectivity test failed')
+      return new Response(
+        JSON.stringify({ 
+          error: 'Erro de conectividade com a Binance',
+          details: 'Não foi possível conectar com a API da Binance'
+        }),
+        { 
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
     const timestamp = Date.now()
     const queryString = `timestamp=${timestamp}`
     
@@ -77,14 +91,14 @@ serve(async (req) => {
       .map(b => b.toString(16).padStart(2, '0'))
       .join('')
 
-    // Get account information from Binance
     const binanceUrl = `https://api.binance.com/api/v3/account?${queryString}&signature=${signatureHex}`
     
     console.log('Making request to Binance API...')
     
     const response = await fetch(binanceUrl, {
       headers: {
-        'X-MBX-APIKEY': apiKey
+        'X-MBX-APIKEY': apiKey,
+        'Content-Type': 'application/json'
       }
     })
 
@@ -99,13 +113,16 @@ serve(async (req) => {
       
       if (data.code === -2015) {
         errorMessage = 'Credenciais da Binance inválidas'
-        details = 'Verifique se sua API Key e Secret Key estão corretas e se têm permissão "Spot & Margin Trading" habilitada. Também verifique se o IP está na whitelist se você configurou restrições de IP.'
+        details = 'Verifique se suas credenciais estão corretas e se têm as permissões necessárias:\n• Permissão "Spot & Margin Trading" habilitada\n• API Key ativa\n• Sem restrições de IP ou IP na whitelist'
       } else if (data.code === -1021) {
         errorMessage = 'Erro de sincronização de tempo'
         details = 'Problema de timestamp. Tente novamente em alguns segundos.'
       } else if (data.code === -1022) {
         errorMessage = 'Assinatura inválida'
         details = 'Problema com a Secret Key. Verifique se está correta.'
+      } else if (data.code === -2014) {
+        errorMessage = 'API Key desabilitada'
+        details = 'Sua API Key está desabilitada. Verifique na sua conta Binance.'
       } else if (data.msg) {
         details = data.msg
       }
@@ -123,12 +140,12 @@ serve(async (req) => {
       )
     }
 
-    if (!data.balances) {
+    if (!data.balances || !Array.isArray(data.balances)) {
       console.error('No balances data in response')
       return new Response(
         JSON.stringify({ 
           error: 'Dados de saldo não encontrados',
-          details: 'A resposta da Binance não contém informações de saldo'
+          details: 'A resposta da Binance não contém informações de saldo válidas'
         }),
         { 
           status: 400,
@@ -139,7 +156,7 @@ serve(async (req) => {
 
     console.log('Processing balances...')
     
-    // Get current crypto prices
+    // Buscar preços atuais
     const pricesResponse = await fetch('https://api.binance.com/api/v3/ticker/price')
     
     if (!pricesResponse.ok) {
@@ -158,7 +175,6 @@ serve(async (req) => {
     
     const prices = await pricesResponse.json()
     
-    // Create a price map for easy lookup
     const priceMap = new Map()
     prices.forEach((price: any) => {
       priceMap.set(price.symbol, parseFloat(price.price))
@@ -167,14 +183,13 @@ serve(async (req) => {
     let totalBalance = 0
     const nonZeroBalances = []
     
-    // Process all balances
     for (const balance of data.balances) {
       const asset = balance.asset
-      const free = parseFloat(balance.free)
-      const locked = parseFloat(balance.locked)
+      const free = parseFloat(balance.free) || 0
+      const locked = parseFloat(balance.locked) || 0
       const total = free + locked
       
-      if (total > 0) {
+      if (total > 0.001) { // Apenas considerar saldos significativos
         nonZeroBalances.push({
           asset,
           free: free.toString(),
@@ -184,28 +199,23 @@ serve(async (req) => {
         
         if (asset === 'USDT') {
           totalBalance += total
-          console.log(`${asset}: ${total} USDT (direct)`)
+          console.log(`${asset}: ${total} USDT (direto)`)
         } else {
-          // Convert other assets to USDT
+          // Converter para USDT
           const usdtSymbol = `${asset}USDT`
           const btcSymbol = `${asset}BTC`
           
           let usdtValue = 0
           
-          // Try direct conversion to USDT
           if (priceMap.has(usdtSymbol)) {
             usdtValue = total * priceMap.get(usdtSymbol)
             console.log(`${asset}: ${total} * ${priceMap.get(usdtSymbol)} = ${usdtValue} USDT`)
-          }
-          // Try conversion via BTC
-          else if (priceMap.has(btcSymbol) && priceMap.has('BTCUSDT')) {
+          } else if (priceMap.has(btcSymbol) && priceMap.has('BTCUSDT')) {
             const btcPrice = priceMap.get(btcSymbol)
             const btcToUsdt = priceMap.get('BTCUSDT')
             usdtValue = total * btcPrice * btcToUsdt
             console.log(`${asset}: ${total} * ${btcPrice} * ${btcToUsdt} = ${usdtValue} USDT (via BTC)`)
-          }
-          // If it's BTC, convert directly
-          else if (asset === 'BTC' && priceMap.has('BTCUSDT')) {
+          } else if (asset === 'BTC' && priceMap.has('BTCUSDT')) {
             usdtValue = total * priceMap.get('BTCUSDT')
             console.log(`${asset}: ${total} * ${priceMap.get('BTCUSDT')} = ${usdtValue} USDT`)
           }
@@ -226,7 +236,8 @@ serve(async (req) => {
         debug: {
           totalAssets: data.balances.length,
           nonZeroAssets: nonZeroBalances.length,
-          calculatedTotal: totalBalance
+          calculatedTotal: totalBalance,
+          accountType: data.accountType
         }
       }),
       { 

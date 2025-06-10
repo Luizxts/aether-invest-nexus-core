@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,7 +17,9 @@ import {
   AlertTriangle,
   Key,
   X,
-  Loader2
+  Loader2,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import TradingChart from './TradingChart';
 import AIStatus from './AIStatus';
@@ -41,11 +44,12 @@ const TradingDashboard: React.FC = () => {
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'error' | 'checking' | 'no-credentials'>('checking');
   const [hasCredentials, setHasCredentials] = useState(false);
   const [showCredentialsAlert, setShowCredentialsAlert] = useState(true);
+  const [lastBalanceUpdate, setLastBalanceUpdate] = useState<Date | null>(null);
 
   useEffect(() => {
     if (user) {
       fetchUserData();
-      const interval = setInterval(fetchRealTimeData, 30000);
+      const interval = setInterval(fetchRealTimeData, 60000); // Atualizar a cada minuto
       return () => clearInterval(interval);
     }
   }, [user]);
@@ -70,6 +74,7 @@ const TradingDashboard: React.FC = () => {
           if ('daily_pnl' in newData && newData.daily_pnl !== undefined) {
             setDailyPnL(Number(newData.daily_pnl));
           }
+          setLastBalanceUpdate(new Date());
         }
       })
       .subscribe();
@@ -111,8 +116,11 @@ const TradingDashboard: React.FC = () => {
 
       if (portfolio) {
         setPortfolioData(portfolio);
-        setRealTimeBalance(Number(portfolio.total_balance));
-        setDailyPnL(Number(portfolio.daily_pnl));
+        setRealTimeBalance(Number(portfolio.total_balance) || 0);
+        setDailyPnL(Number(portfolio.daily_pnl) || 0);
+        if (portfolio.last_updated) {
+          setLastBalanceUpdate(new Date(portfolio.last_updated));
+        }
       }
 
       const { data: risk } = await supabase
@@ -129,6 +137,11 @@ const TradingDashboard: React.FC = () => {
 
     } catch (error) {
       console.error('Error fetching user data:', error);
+      toast({
+        title: "Erro",
+        description: "Erro ao carregar dados do usuário",
+        variant: "destructive",
+      });
     }
   };
 
@@ -155,8 +168,8 @@ const TradingDashboard: React.FC = () => {
         setConnectionStatus('error');
         
         toast({
-          title: "Erro ao conectar com Binance",
-          description: "Verifique suas credenciais e tente novamente",
+          title: "Erro de conexão",
+          description: "Erro interno do servidor. Tente novamente.",
           variant: "destructive",
         });
         return;
@@ -189,20 +202,23 @@ const TradingDashboard: React.FC = () => {
         console.log('Balance details:', response.data);
         
         setRealTimeBalance(newBalance);
-        setDailyPnL(prev => prev + pnl);
+        if (pnl !== 0) {
+          setDailyPnL(prev => prev + pnl);
+        }
         setBalanceDetails(response.data);
         setConnectionStatus('connected');
+        setLastBalanceUpdate(new Date());
 
         await supabase
           .from('portfolio_data')
           .upsert({
             user_id: user.id,
             total_balance: newBalance,
-            daily_pnl: dailyPnL + pnl,
+            daily_pnl: dailyPnL + (pnl !== 0 ? pnl : 0),
             last_updated: new Date().toISOString()
           });
 
-        if (response.data.message) {
+        if (response.data.message && pnl !== 0) {
           toast({
             title: "Saldo atualizado!",
             description: response.data.message,
@@ -222,7 +238,7 @@ const TradingDashboard: React.FC = () => {
       setConnectionStatus('error');
       toast({
         title: "Erro de conexão",
-        description: "Erro ao conectar com a Binance. Tente novamente.",
+        description: "Erro ao conectar com a Binance. Verifique sua conexão.",
         variant: "destructive",
       });
     } finally {
@@ -255,15 +271,28 @@ const TradingDashboard: React.FC = () => {
           ...riskSettings,
           is_trading_active: newTradingState
         });
+        
+        toast({
+          title: newTradingState ? "Trading iniciado!" : "Trading pausado!",
+          description: newTradingState 
+            ? "A IA está agora operando automaticamente" 
+            : "Todas as operações automáticas foram pausadas",
+        });
       }
     } catch (error) {
       console.error('Error toggling trading:', error);
+      toast({
+        title: "Erro",
+        description: "Erro ao alterar status do trading",
+        variant: "destructive",
+      });
     }
   };
 
   const handleCredentialsUpdated = () => {
     setHasCredentials(true);
     setConnectionStatus('checking');
+    setShowCredentialsAlert(false);
     fetchRealTimeData();
   };
 
@@ -295,7 +324,7 @@ const TradingDashboard: React.FC = () => {
     if (connectionStatus === 'connected') {
       return (
         <Badge variant="outline" className="border-neon-green text-neon-green">
-          <Eye className="w-4 h-4 mr-2" />
+          <Wifi className="w-4 h-4 mr-2" />
           Binance Conectada
         </Badge>
       );
@@ -304,7 +333,7 @@ const TradingDashboard: React.FC = () => {
     if (connectionStatus === 'error') {
       return (
         <Badge variant="outline" className="border-red-500 text-red-500">
-          <AlertTriangle className="w-4 h-4 mr-2" />
+          <WifiOff className="w-4 h-4 mr-2" />
           Erro de Conexão
         </Badge>
       );
@@ -318,9 +347,27 @@ const TradingDashboard: React.FC = () => {
     );
   };
 
+  const formatLastUpdate = () => {
+    if (!lastBalanceUpdate) return "Nunca";
+    
+    const now = new Date();
+    const diff = now.getTime() - lastBalanceUpdate.getTime();
+    const minutes = Math.floor(diff / 60000);
+    
+    if (minutes < 1) return "Agora";
+    if (minutes === 1) return "1 minuto atrás";
+    if (minutes < 60) return `${minutes} minutos atrás`;
+    
+    const hours = Math.floor(minutes / 60);
+    if (hours === 1) return "1 hora atrás";
+    if (hours < 24) return `${hours} horas atrás`;
+    
+    const days = Math.floor(hours / 24);
+    return `${days} dia${days > 1 ? 's' : ''} atrás`;
+  };
+
   return (
     <div className="min-h-screen bg-matrix-dark p-4 matrix-effect">
-      {/* Alert de credenciais não configuradas */}
       {!hasCredentials && showCredentialsAlert && (
         <Alert className="mb-6 border-yellow-500/50 bg-yellow-500/10">
           <Key className="h-4 w-4 text-yellow-500" />
@@ -341,7 +388,6 @@ const TradingDashboard: React.FC = () => {
         </Alert>
       )}
 
-      {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -390,7 +436,6 @@ const TradingDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Status Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <Card className="cyber-card">
             <CardContent className="p-4">
@@ -405,6 +450,9 @@ const TradingDashboard: React.FC = () => {
                       {balanceDetails.debug.nonZeroAssets} ativos
                     </p>
                   )}
+                  <p className="text-xs text-gray-500">
+                    Última atualização: {formatLastUpdate()}
+                  </p>
                   {!hasCredentials && (
                     <p className="text-xs text-yellow-400">
                       Configure API first
@@ -478,7 +526,6 @@ const TradingDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Content */}
       <Tabs defaultValue="dashboard" className="space-y-4">
         <TabsList className="grid w-full grid-cols-5 bg-gray-800/50">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>

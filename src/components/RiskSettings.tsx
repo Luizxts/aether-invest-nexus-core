@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -19,7 +20,8 @@ import {
   Play, 
   Trash2,
   BookOpen,
-  Loader2
+  Loader2,
+  Info
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -51,6 +53,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [aiEvolution, setAiEvolution] = useState<any>(null);
+  const [validationResult, setValidationResult] = useState<any>(null);
 
   useEffect(() => {
     checkExistingCredentials();
@@ -95,6 +98,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
   const validateBinanceCredentials = async (apiKey: string, secretKey: string) => {
     try {
       setIsValidatingAPI(true);
+      setValidationResult(null);
       
       console.log('Validating credentials with API Key:', apiKey.substring(0, 8) + '...');
       
@@ -111,9 +115,21 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
 
       if (response.data?.valid) {
         console.log('Credentials are valid!');
+        setValidationResult({
+          valid: true,
+          accountType: response.data.accountType,
+          permissions: response.data.permissions
+        });
         return true;
       } else {
-        console.error('Credentials are invalid:', response.data?.error);
+        console.error('Credentials are invalid:', response.data);
+        setValidationResult({
+          valid: false,
+          error: response.data?.error,
+          help: response.data?.help,
+          code: response.data?.code
+        });
+        
         toast({
           title: "Credenciais inválidas",
           description: response.data?.error || "Verifique sua API Key e Secret Key",
@@ -123,6 +139,12 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
       }
     } catch (error) {
       console.error('Error validating credentials:', error);
+      setValidationResult({
+        valid: false,
+        error: 'Erro de validação',
+        help: 'Não foi possível validar as credenciais. Tente novamente.'
+      });
+      
       toast({
         title: "Erro de validação",
         description: "Não foi possível validar as credenciais. Tente novamente.",
@@ -249,7 +271,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
 
       await fetchBalanceAfterSave();
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao salvar credenciais:', error);
       toast({
         title: "Erro",
@@ -275,6 +297,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
       }
 
       setHasCredentials(false);
+      setValidationResult(null);
       
       toast({
         title: "Credenciais removidas",
@@ -362,6 +385,11 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
               <CheckCircle className="h-4 w-4 text-green-500" />
               <AlertDescription className="text-green-200">
                 Credenciais configuradas! O robô está pronto para operar.
+                {validationResult?.accountType && (
+                  <div className="mt-2 text-xs">
+                    Tipo de conta: {validationResult.accountType}
+                  </div>
+                )}
               </AlertDescription>
             </Alert>
           )}
@@ -373,6 +401,20 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
                 {isValidatingAPI && "🔍 Validando credenciais com a Binance..."}
                 {isLoading && !isValidatingAPI && !isFetchingBalance && "💾 Salvando credenciais..."}
                 {isFetchingBalance && "💰 Buscando saldo atual..."}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {validationResult && !validationResult.valid && (
+            <Alert className="border-red-500/50 bg-red-500/10">
+              <AlertTriangle className="h-4 w-4 text-red-500" />
+              <AlertDescription className="text-red-200">
+                <strong>Erro:</strong> {validationResult.error}
+                {validationResult.help && (
+                  <div className="mt-2 text-xs whitespace-pre-line">
+                    {validationResult.help}
+                  </div>
+                )}
               </AlertDescription>
             </Alert>
           )}
@@ -449,17 +491,27 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
               )}
             </div>
 
-            <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-              <h4 className="font-semibold text-blue-300 mb-2">📋 Como obter suas credenciais:</h4>
-              <ol className="text-sm text-blue-200 space-y-1">
+            <div className="bg-gray-800/30 p-4 rounded-lg border border-gray-700/50">
+              <h4 className="text-sm font-semibold text-neon-green mb-2 flex items-center gap-2">
+                <Info className="w-4 h-4" />
+                Como obter suas credenciais:
+              </h4>
+              <ol className="text-xs text-gray-400 space-y-1">
                 <li>1. Acesse sua conta na Binance</li>
                 <li>2. Vá em Perfil → Segurança API</li>
                 <li>3. Crie uma nova API Key</li>
-                <li>4. <strong>Habilite "Spot & Margin Trading"</strong></li>
-                <li>5. Cole aqui suas credenciais</li>
+                <li>4. <strong className="text-yellow-300">Habilite "Spot & Margin Trading"</strong></li>
+                <li>5. <strong className="text-yellow-300">Não configure restrições de IP</strong> (ou adicione o IP do servidor)</li>
+                <li>6. Cole aqui suas credenciais</li>
               </ol>
-              <div className="mt-2 p-2 bg-red-500/20 border border-red-500/30 rounded text-xs">
-                <strong>⚠️ Importante:</strong> Se você configurou restrição de IP, adicione o IP do servidor na whitelist ou desative a restrição.
+              <div className="mt-3 p-3 bg-red-500/20 border border-red-500/30 rounded text-xs">
+                <strong>⚠️ Problemas comuns:</strong>
+                <ul className="mt-1 space-y-1">
+                  <li>• API Key sem permissão "Spot & Margin Trading"</li>
+                  <li>• Restrições de IP configuradas</li>
+                  <li>• API Key desabilitada</li>
+                  <li>• Secret Key incorreta</li>
+                </ul>
               </div>
             </div>
           </div>
@@ -535,7 +587,6 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
         </CardContent>
       </Card>
 
-      {/* Tutorial e Conta */}
       <Card className="cyber-card">
         <CardHeader>
           <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
@@ -587,7 +638,6 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
         </CardContent>
       </Card>
 
-      {/* Configurações Avançadas */}
       <Card className="cyber-card">
         <CardHeader>
           <CardTitle className="text-lg font-bold text-white">
@@ -621,7 +671,6 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
         </CardContent>
       </Card>
 
-      {/* Delete Account Dialog */}
       <DeleteAccountDialog
         isOpen={showDeleteDialog}
         onClose={() => setShowDeleteDialog(false)}
