@@ -45,6 +45,7 @@ const TradingDashboard: React.FC = () => {
   const [hasCredentials, setHasCredentials] = useState(false);
   const [showCredentialsAlert, setShowCredentialsAlert] = useState(true);
   const [lastBalanceUpdate, setLastBalanceUpdate] = useState<Date | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -153,6 +154,7 @@ const TradingDashboard: React.FC = () => {
 
     setIsLoadingBalance(true);
     setConnectionStatus('checking');
+    setConnectionError(null);
     
     try {
       console.log('Fetching balance for user:', user.id);
@@ -163,21 +165,25 @@ const TradingDashboard: React.FC = () => {
 
       console.log('Balance response:', response);
 
+      // Verificar erro da edge function
       if (response.error) {
         console.error('Error from edge function:', response.error);
         setConnectionStatus('error');
+        setConnectionError('Erro interno do servidor');
         
         toast({
-          title: "Erro de conexão",
+          title: "Erro de sistema",
           description: "Erro interno do servidor. Tente novamente.",
           variant: "destructive",
         });
         return;
       }
 
+      // Verificar erro da API da Binance
       if (response.data?.error) {
         console.error('Error from Binance API:', response.data);
         setConnectionStatus('error');
+        setConnectionError(response.data.error);
         
         let errorTitle = "Erro na Binance";
         let errorDescription = response.data.error;
@@ -194,6 +200,7 @@ const TradingDashboard: React.FC = () => {
         return;
       }
 
+      // Sucesso - processar dados
       if (response.data?.balance !== undefined) {
         const newBalance = response.data.balance;
         const pnl = newBalance - realTimeBalance;
@@ -207,6 +214,7 @@ const TradingDashboard: React.FC = () => {
         }
         setBalanceDetails(response.data);
         setConnectionStatus('connected');
+        setConnectionError(null);
         setLastBalanceUpdate(new Date());
 
         await supabase
@@ -227,6 +235,7 @@ const TradingDashboard: React.FC = () => {
       } else {
         console.error('No balance data received:', response.data);
         setConnectionStatus('error');
+        setConnectionError('Dados de saldo não encontrados');
         toast({
           title: "Erro de dados",
           description: "Não foi possível obter o saldo da Binance",
@@ -236,6 +245,7 @@ const TradingDashboard: React.FC = () => {
     } catch (error) {
       console.error('Error fetching real-time data:', error);
       setConnectionStatus('error');
+      setConnectionError('Erro de conexão');
       toast({
         title: "Erro de conexão",
         description: "Erro ao conectar com a Binance. Verifique sua conexão.",
@@ -293,6 +303,7 @@ const TradingDashboard: React.FC = () => {
     setHasCredentials(true);
     setConnectionStatus('checking');
     setShowCredentialsAlert(false);
+    setConnectionError(null);
     fetchRealTimeData();
   };
 
@@ -388,6 +399,25 @@ const TradingDashboard: React.FC = () => {
         </Alert>
       )}
 
+      {connectionError && (
+        <Alert className="mb-6 border-red-500/50 bg-red-500/10">
+          <WifiOff className="h-4 w-4 text-red-500" />
+          <AlertDescription className="text-red-200 flex items-center justify-between">
+            <span>
+              <strong>Erro de conexão:</strong> {connectionError}
+            </span>
+            <Button
+              onClick={() => setConnectionError(null)}
+              variant="ghost"
+              size="sm"
+              className="text-red-300 hover:text-red-100 ml-4"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -455,7 +485,7 @@ const TradingDashboard: React.FC = () => {
                   </p>
                   {!hasCredentials && (
                     <p className="text-xs text-yellow-400">
-                      Configure API first
+                      Configure API primeiro
                     </p>
                   )}
                   {isLoadingBalance && (

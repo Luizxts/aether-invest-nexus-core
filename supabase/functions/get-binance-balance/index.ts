@@ -53,14 +53,28 @@ serve(async (req) => {
     
     console.log('Testing Binance connection with API Key:', apiKey.substring(0, 8) + '...')
 
-    // Primeiro testar conectividade básica
-    const basicTest = await fetch('https://api.binance.com/api/v3/time')
-    if (!basicTest.ok) {
-      console.error('Basic connectivity test failed')
+    // Testar conectividade básica primeiro
+    try {
+      const basicTest = await fetch('https://api.binance.com/api/v3/time')
+      if (!basicTest.ok) {
+        console.error('Basic connectivity test failed:', basicTest.status)
+        return new Response(
+          JSON.stringify({ 
+            error: 'Erro de conectividade com a Binance',
+            details: 'Não foi possível conectar com a API da Binance'
+          }),
+          { 
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        )
+      }
+    } catch (connectError) {
+      console.error('Network connectivity error:', connectError)
       return new Response(
         JSON.stringify({ 
-          error: 'Erro de conectividade com a Binance',
-          details: 'Não foi possível conectar com a API da Binance'
+          error: 'Erro de conectividade',
+          details: 'Problema de rede. Verifique sua conexão com a internet.'
         }),
         { 
           status: 500,
@@ -72,38 +86,71 @@ serve(async (req) => {
     const timestamp = Date.now()
     const queryString = `timestamp=${timestamp}`
     
-    const encoder = new TextEncoder()
-    const key = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(secretKey),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    )
-    
-    const signature = await crypto.subtle.sign(
-      'HMAC',
-      key,
-      encoder.encode(queryString)
-    )
-    
-    const signatureHex = Array.from(new Uint8Array(signature))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('')
+    // Criar assinatura HMAC
+    let signatureHex = ''
+    try {
+      const encoder = new TextEncoder()
+      const key = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(secretKey),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+      )
+      
+      const signature = await crypto.subtle.sign(
+        'HMAC',
+        key,
+        encoder.encode(queryString)
+      )
+      
+      signatureHex = Array.from(new Uint8Array(signature))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('')
+    } catch (sigError) {
+      console.error('Error creating signature:', sigError)
+      return new Response(
+        JSON.stringify({ 
+          error: 'Erro na criação da assinatura',
+          details: 'Problema com a Secret Key. Verifique se está correta.'
+        }),
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
 
     const binanceUrl = `https://api.binance.com/api/v3/account?${queryString}&signature=${signatureHex}`
     
     console.log('Making request to Binance API...')
     
-    const response = await fetch(binanceUrl, {
-      headers: {
-        'X-MBX-APIKEY': apiKey,
-        'Content-Type': 'application/json'
-      }
-    })
+    let response
+    let data
+    
+    try {
+      response = await fetch(binanceUrl, {
+        headers: {
+          'X-MBX-APIKEY': apiKey,
+          'Content-Type': 'application/json'
+        }
+      })
 
-    const data = await response.json()
-    console.log('Binance API Response status:', response.status)
+      data = await response.json()
+      console.log('Binance API Response status:', response.status)
+    } catch (fetchError) {
+      console.error('Error making request to Binance:', fetchError)
+      return new Response(
+        JSON.stringify({ 
+          error: 'Erro de comunicação com a Binance',
+          details: 'Falha na requisição para a API da Binance'
+        }),
+        { 
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
 
     if (!response.ok) {
       console.error('Binance API Error:', data)
@@ -157,14 +204,31 @@ serve(async (req) => {
     console.log('Processing balances...')
     
     // Buscar preços atuais
-    const pricesResponse = await fetch('https://api.binance.com/api/v3/ticker/price')
-    
-    if (!pricesResponse.ok) {
-      console.error('Failed to fetch prices')
+    let prices = []
+    try {
+      const pricesResponse = await fetch('https://api.binance.com/api/v3/ticker/price')
+      
+      if (!pricesResponse.ok) {
+        console.error('Failed to fetch prices:', pricesResponse.status)
+        return new Response(
+          JSON.stringify({ 
+            error: 'Erro ao buscar preços das criptomoedas',
+            details: 'Não foi possível obter os preços atuais'
+          }),
+          { 
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        )
+      }
+      
+      prices = await pricesResponse.json()
+    } catch (priceError) {
+      console.error('Error fetching prices:', priceError)
       return new Response(
         JSON.stringify({ 
-          error: 'Erro ao buscar preços das criptomoedas',
-          details: 'Não foi possível obter os preços atuais'
+          error: 'Erro ao buscar preços',
+          details: 'Não foi possível obter os preços atuais das criptomoedas'
         }),
         { 
           status: 500,
@@ -172,8 +236,6 @@ serve(async (req) => {
         }
       )
     }
-    
-    const prices = await pricesResponse.json()
     
     const priceMap = new Map()
     prices.forEach((price: any) => {
@@ -250,7 +312,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         error: 'Erro interno do servidor',
-        details: 'Erro ao conectar com a Binance. Verifique suas credenciais e tente novamente.',
+        details: 'Erro inesperado. Tente novamente em alguns instantes.',
         technicalDetails: error.message 
       }),
       { 

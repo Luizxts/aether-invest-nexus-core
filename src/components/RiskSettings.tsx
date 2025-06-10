@@ -21,7 +21,8 @@ import {
   Trash2,
   BookOpen,
   Loader2,
-  Info
+  Info,
+  WifiOff
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -54,6 +55,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [aiEvolution, setAiEvolution] = useState<any>(null);
   const [validationResult, setValidationResult] = useState<any>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   useEffect(() => {
     checkExistingCredentials();
@@ -73,6 +75,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
 
       setHasCredentials(!!data && !error);
     } catch (err) {
+      console.error('Error checking credentials:', err);
       setHasCredentials(false);
     }
   };
@@ -99,6 +102,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
     try {
       setIsValidatingAPI(true);
       setValidationResult(null);
+      setConnectionError(null);
       
       console.log('Validating credentials with API Key:', apiKey.substring(0, 8) + '...');
       
@@ -108,11 +112,20 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
 
       console.log('Validation response:', response);
 
+      // Verificar se houve erro na função edge
       if (response.error) {
-        console.error('Validation error:', response.error);
-        throw new Error('Erro ao validar credenciais');
+        console.error('Edge function error:', response.error);
+        setConnectionError('Erro interno do servidor. Tente novamente.');
+        
+        toast({
+          title: "Erro de sistema",
+          description: "Erro interno do servidor. Tente novamente em alguns instantes.",
+          variant: "destructive",
+        });
+        return false;
       }
 
+      // Verificar resposta da validação
       if (response.data?.valid) {
         console.log('Credentials are valid!');
         setValidationResult({
@@ -120,34 +133,43 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
           accountType: response.data.accountType,
           permissions: response.data.permissions
         });
+        setConnectionError(null);
         return true;
       } else {
         console.error('Credentials are invalid:', response.data);
+        const errorData = response.data || {};
+        
         setValidationResult({
           valid: false,
-          error: response.data?.error,
-          help: response.data?.help,
-          code: response.data?.code
+          error: errorData.error || 'Credenciais inválidas',
+          help: errorData.help,
+          code: errorData.code
         });
+        
+        setConnectionError(errorData.error || 'Credenciais inválidas');
         
         toast({
           title: "Credenciais inválidas",
-          description: response.data?.error || "Verifique sua API Key e Secret Key",
+          description: errorData.error || "Verifique sua API Key e Secret Key",
           variant: "destructive",
         });
         return false;
       }
     } catch (error) {
       console.error('Error validating credentials:', error);
+      const errorMessage = 'Erro de conexão. Verifique sua internet e tente novamente.';
+      
       setValidationResult({
         valid: false,
-        error: 'Erro de validação',
-        help: 'Não foi possível validar as credenciais. Tente novamente.'
+        error: errorMessage,
+        help: 'Verifique sua conexão com a internet e tente novamente.'
       });
       
+      setConnectionError(errorMessage);
+      
       toast({
-        title: "Erro de validação",
-        description: "Não foi possível validar as credenciais. Tente novamente.",
+        title: "Erro de conexão",
+        description: errorMessage,
         variant: "destructive",
       });
       return false;
@@ -228,6 +250,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
     }
 
     setIsLoading(true);
+    setConnectionError(null);
 
     try {
       console.log('Validating credentials...');
@@ -259,6 +282,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
       console.log('Credentials saved successfully');
       setHasCredentials(true);
       setApiCredentials({ apiKey: '', secretKey: '' });
+      setConnectionError(null);
       
       toast({
         title: "Sucesso!",
@@ -273,6 +297,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
 
     } catch (error: any) {
       console.error('Erro ao salvar credenciais:', error);
+      setConnectionError('Erro ao salvar credenciais no banco de dados');
       toast({
         title: "Erro",
         description: `Erro ao salvar credenciais: ${error.message || 'Tente novamente.'}`,
@@ -298,6 +323,7 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
 
       setHasCredentials(false);
       setValidationResult(null);
+      setConnectionError(null);
       
       toast({
         title: "Credenciais removidas",
@@ -405,7 +431,16 @@ const RiskSettings: React.FC<RiskSettingsProps> = ({ settings, onSettingsChange,
             </Alert>
           )}
 
-          {validationResult && !validationResult.valid && (
+          {connectionError && (
+            <Alert className="border-red-500/50 bg-red-500/10">
+              <WifiOff className="h-4 w-4 text-red-500" />
+              <AlertDescription className="text-red-200">
+                <strong>Erro de conexão:</strong> {connectionError}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {validationResult && !validationResult.valid && !connectionError && (
             <Alert className="border-red-500/50 bg-red-500/10">
               <AlertTriangle className="h-4 w-4 text-red-500" />
               <AlertDescription className="text-red-200">

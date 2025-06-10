@@ -25,19 +25,38 @@ serve(async (req) => {
 
     console.log('Validating credentials for API Key:', apiKey.substring(0, 8) + '...')
 
-    // Testar com endpoint mais simples primeiro
-    const testUrl = 'https://api.binance.com/api/v3/exchangeInfo'
-    
-    console.log('Testing basic API connectivity...')
-    
-    const basicResponse = await fetch(testUrl)
-    
-    if (!basicResponse.ok) {
-      console.error('Basic API test failed:', basicResponse.status)
+    // Primeiro testar conectividade básica com a API da Binance
+    try {
+      const basicResponse = await fetch('https://api.binance.com/api/v3/time', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      if (!basicResponse.ok) {
+        console.error('Basic API connectivity failed:', basicResponse.status)
+        return new Response(
+          JSON.stringify({ 
+            valid: false, 
+            error: 'Erro de conectividade com a API da Binance',
+            details: 'Não foi possível conectar com os servidores da Binance'
+          }),
+          { 
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        )
+      }
+      
+      console.log('Basic connectivity test passed')
+    } catch (connectError) {
+      console.error('Network error during basic connectivity test:', connectError)
       return new Response(
         JSON.stringify({ 
           valid: false, 
-          error: 'Erro de conectividade com a API da Binance. Tente novamente.' 
+          error: 'Erro de conectividade',
+          details: 'Não foi possível conectar com a internet ou servidores da Binance'
         }),
         { 
           status: 500,
@@ -46,45 +65,83 @@ serve(async (req) => {
       )
     }
 
-    // Agora testar com credenciais - usar endpoint de tempo do servidor primeiro
+    // Agora testar com credenciais
     const timestamp = Date.now()
     const queryString = `timestamp=${timestamp}`
     
-    const encoder = new TextEncoder()
-    const key = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(secretKey),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    )
-    
-    const signature = await crypto.subtle.sign(
-      'HMAC',
-      key,
-      encoder.encode(queryString)
-    )
-    
-    const signatureHex = Array.from(new Uint8Array(signature))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('')
+    // Criar assinatura HMAC
+    let signatureHex = ''
+    try {
+      const encoder = new TextEncoder()
+      const key = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(secretKey),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+      )
+      
+      const signature = await crypto.subtle.sign(
+        'HMAC',
+        key,
+        encoder.encode(queryString)
+      )
+      
+      signatureHex = Array.from(new Uint8Array(signature))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('')
+    } catch (sigError) {
+      console.error('Error creating signature:', sigError)
+      return new Response(
+        JSON.stringify({ 
+          valid: false, 
+          error: 'Erro na criação da assinatura',
+          details: 'Secret Key pode estar incorreta ou malformada'
+        }),
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
 
-    // Usar endpoint de informações da conta
+    // Testar endpoint autenticado
     const accountUrl = `https://api.binance.com/api/v3/account?${queryString}&signature=${signatureHex}`
     
     console.log('Testing authenticated endpoint...')
     
-    const response = await fetch(accountUrl, {
-      headers: {
-        'X-MBX-APIKEY': apiKey,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    const data = await response.json()
+    let response
+    let data
     
-    console.log('Binance API Response Status:', response.status)
-    console.log('Binance API Response Data:', JSON.stringify(data, null, 2))
+    try {
+      response = await fetch(accountUrl, {
+        method: 'GET',
+        headers: {
+          'X-MBX-APIKEY': apiKey,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        console.log('Binance API Response Status:', response.status)
+      }
+
+      data = await response.json()
+      console.log('Binance API Response Data:', JSON.stringify(data, null, 2))
+    } catch (fetchError) {
+      console.error('Error making request to Binance:', fetchError)
+      return new Response(
+        JSON.stringify({ 
+          valid: false, 
+          error: 'Erro de comunicação com a Binance',
+          details: 'Falha na requisição para a API da Binance'
+        }),
+        { 
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
 
     if (response.ok && data.accountType) {
       console.log('Credentials validated successfully')
@@ -115,8 +172,8 @@ serve(async (req) => {
         errorMessage = 'Assinatura inválida'
         helpMessage = 'Verifique se a Secret Key está correta'
       } else if (data.code === -2014) {
-        errorMessage = 'API Key está desabilitada'
-        helpMessage = 'Verifique se a API Key está ativa em sua conta Binance'
+        errorMessage = 'API Key inválida ou desabilitada'
+        helpMessage = 'Verifique se a API Key está ativa e bem formada'
       } else if (data.msg) {
         errorMessage = data.msg
       }
@@ -140,8 +197,8 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         valid: false, 
-        error: 'Erro interno ao validar credenciais',
-        details: error.message 
+        error: 'Erro interno do servidor',
+        details: 'Erro inesperado durante a validação. Tente novamente.' 
       }),
       { 
         status: 500,
